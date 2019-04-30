@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Rank2Types #-}
 
 -- | Resumable parser with backtracking-by-default.
@@ -5,6 +6,7 @@
 module Data.Reparsec
   ( parseOnly
   , failWith
+  , UnexpectedToken(..)
   , Parser(..)
   , Result(..)
   -- Error handling
@@ -83,6 +85,10 @@ class NoMoreInput e where
 -- | A parser expected to reach end of input, but didn't.
 class ExpectedEndOfInput e where
   expectedEndOfInputError :: e
+
+-- | A token in a parse was unexpected.
+class UnexpectedToken t e where
+  unexpectedToken :: t -> e
 
 -- | Fail the parser with the given error.
 failWith :: e -> Parser i e a

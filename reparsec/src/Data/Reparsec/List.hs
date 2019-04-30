@@ -3,9 +3,18 @@
 module Data.Reparsec.List
   ( nextElement
   , endOfInput
+  , expect
   ) where
 
 import Data.Reparsec
+
+-- | Expect an element.
+expect :: (UnexpectedToken a e, NoMoreInput e, Eq a) => a -> Parser [a] e ()
+expect a = do
+  a' <- nextElement
+  if a == a'
+    then pure ()
+    else failWith (unexpectedToken a')
 
 -- | Try to extract the next element from the input.
 nextElement :: NoMoreInput e => Parser [a] e a

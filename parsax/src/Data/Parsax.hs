@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ExistentialQuantification #-}
@@ -24,9 +25,11 @@ import Data.Text (Text)
 data ParseError
   = UserParseError !Text
   | NoMoreInput
+  | UnexpectedEvent !Event
   deriving (Show, Eq)
 
 instance NoMoreInput ParseError where noMoreInputError = NoMoreInput
+instance UnexpectedToken Event ParseError where unexpectedToken = UnexpectedEvent
 
 -- | A SAX event, containing either a scalar, array or object with keys.
 data Event
@@ -77,3 +80,13 @@ valueReparsec =
           case parse bs of
             Right v -> pure v
             Left err -> failWith (UserParseError err)
+
+--------------------------------------------------------------------------------
+-- Helpers
+
+around ::
+     Event
+  -> Event
+  -> Parser [Event] ParseError a
+  -> Parser [Event] ParseError a
+around before after inner = expect before *> inner <* expect after
