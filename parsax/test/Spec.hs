@@ -20,7 +20,9 @@ spec = do
     (it
        "Empty input"
        (do pending
-           shouldBe (runConduitPure (CL.sourceList [] .| objectSink (Pure ()))) ()))
+           shouldBe
+             (runConduitPure (CL.sourceList [] .| objectSink (PureObject ())))
+             ()))
   describe
     "Reparsec"
     (do describe
@@ -36,7 +38,7 @@ spec = do
                 "Fmap"
                 (shouldBe
                    (parseOnly
-                      (valueReparsec (FMap (+ 1) (Scalar (const (pure 1)))))
+                      (valueReparsec (FMapValue (+ 1) (Scalar (const (pure 1)))))
                       [EventScalar "1"])
                    (Right (2 :: Int)))
               it
@@ -75,6 +77,24 @@ spec = do
                 (shouldBe
                    (parseOnly
                       (valueReparsec
-                         (Array (Scalar (first T.pack . readEither . S8.unpack) <> Scalar (const (Left "")))))
+                         (Array
+                            (Scalar (first T.pack . readEither . S8.unpack) <>
+                             Scalar (const (Left "")))))
                       [EventArrayStart, EventScalar "a", EventArrayEnd])
-                   (Left (UnexpectedEvent (EventScalar "a")) :: Either ParseError [Int]))))
+                   (Left (UnexpectedEvent (EventScalar "a")) :: Either ParseError [Int])))
+        describe
+          "Object"
+          (do it
+                "Object"
+                (shouldBe
+                   (parseOnly
+                      (valueReparsec
+                         (Object (Field "y" (Scalar (const (pure 1))))))
+                      [ EventObjectStart
+                      , EventObjectKey "x"
+                      , EventScalar "1"
+                      , EventObjectKey "y"
+                      , EventScalar "2"
+                      , EventObjectEnd
+                      ])
+                   (Right (1 :: Int)))))

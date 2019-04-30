@@ -26,7 +26,7 @@ newtype Parser input error value = Parser
                  Maybe input
               -> (Maybe input -> value -> Result input error result)
               -> (Maybe input -> error -> Result input error result)
-              -> Result input error result
+              -> (Result input error result)
   }
 
 -- | Result of a parser. Maybe be partial (expecting more input).

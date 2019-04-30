@@ -18,7 +18,9 @@ library
                        conduit,
                        reparsec,
                        bytestring,
-                       text
+                       text,
+                       containers,
+                       vault
   default-language:    Haskell2010
 
 test-suite parsax-test
