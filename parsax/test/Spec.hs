@@ -91,13 +91,18 @@ spec = do
                       (valueReparsec
                          (Object
                             ((,) <$> Field "y" (Scalar (const (pure 1))) <*>
-                             (Field "x" (Scalar (const (Left "")) <> Scalar (const (pure 4))) <>
-                              Field "z" (Scalar (const (pure 3)))))))
+                             (Field
+                                "x"
+                                (Array (Scalar (first T.pack . readEither . S8.unpack) <>
+                                        Scalar (const (pure 4)))) <>
+                              Field "z" (Scalar (const (pure [3])))))))
                       [ EventObjectStart
                       , EventObjectKey "x"
+                      , EventArrayStart
                       , EventScalar "1"
+                      , EventArrayEnd
                       , EventObjectKey "y"
                       , EventScalar "2"
                       , EventObjectEnd
                       ])
-                   (Right (1 :: Int, 4 :: Int)))))
+                   (Right (1 :: Int, [4 :: Int])))))
