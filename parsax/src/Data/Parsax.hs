@@ -16,12 +16,16 @@ module Data.Parsax
   , ParseError (..)
   ) where
 
-import           Data.ByteString (ByteString)
-import           Data.Conduit
-import           Data.List.NonEmpty (NonEmpty(..))
-import           Data.Reparsec
-import           Data.Reparsec.List
-import           Data.Text (Text)
+import Control.Applicative
+import Data.ByteString (ByteString)
+import Data.Conduit
+import Data.List.NonEmpty (NonEmpty(..))
+import Data.Reparsec
+import Data.Reparsec.List
+import Data.Text (Text)
+
+--------------------------------------------------------------------------------
+-- Types
 
 data ParseError
   = UserParseError !Text
@@ -51,11 +55,12 @@ data Event
   deriving (Show, Eq)
 
 -- | Parser of an object.
-data ObjectParser a
-  = Field Text (Maybe a) (ValueParser a)
-  | forall b c. LiftA2 (b -> c -> a) (ObjectParser b) (ObjectParser c)
-  | AltObject (NonEmpty (ObjectParser a))
-  | Pure a
+data ObjectParser a where
+  Field :: Text -> Maybe a -> ValueParser a -> ObjectParser a
+  LiftA2 :: (b -> c -> a) -> ObjectParser b -> ObjectParser c -> ObjectParser a
+  FMapObject :: (x -> a) -> ObjectParser x -> ObjectParser a
+  AltObject :: (NonEmpty (ObjectParser a)) -> ObjectParser a
+  PureObject :: a -> ObjectParser a
 
 instance Semigroup (ObjectParser a) where
   AltObject xs <> AltObject ys = AltObject (xs <> ys)
@@ -68,8 +73,9 @@ data ValueParser a where
   Scalar :: (ByteString -> Either Text a) -> ValueParser a
   Object :: ObjectParser a -> ValueParser a
   Array :: ValueParser a -> ValueParser [a]
-  FMap :: (x -> a) -> ValueParser x -> ValueParser a
+  FMapValue :: (x -> a) -> ValueParser x -> ValueParser a
   AltValue :: NonEmpty (ValueParser a) -> ValueParser a
+  PureValue :: a -> ValueParser a
 
 instance Semigroup (ValueParser a) where
   AltValue xs <> AltValue ys = AltValue (xs <> ys)
@@ -77,26 +83,26 @@ instance Semigroup (ValueParser a) where
   x <> AltValue ys = AltValue ((x :| []) <> ys)
   x <> y = AltValue (x :| [y])
 
--- | Run an object parser on an event stream.
-objectSink :: ObjectParser a -> ConduitT Event o m a
-objectSink =
-  \case
-    Pure a -> pure a
-
--- | Run an value parser on an event stream.
-valueSink :: ValueParser a -> ConduitT Event o m a
-valueSink = undefined
+--------------------------------------------------------------------------------
+-- Reparsecs
 
 -- | Make a reparsec out of an object parser.
 objectReparsec :: ObjectParser a -> Parser [Event] ParseError a
-objectReparsec = undefined
+objectReparsec =
+  \case
+    PureObject a -> pure a
+    AltObject (x :| xs) -> foldr (<>) (objectReparsec x) (map objectReparsec xs)
+    FMapObject f objectParser -> fmap f (objectReparsec objectParser)
+    LiftA2 f objectParser1 objectParser2 ->
+      liftA2 f (objectReparsec objectParser1) (objectReparsec objectParser2)
 
 -- | Make a reparsec out of an value parser.
 valueReparsec :: ValueParser a -> Parser [Event] ParseError a
 valueReparsec =
   \case
+    PureValue a -> pure a
     AltValue (x :| xs) -> foldr (<>) (valueReparsec x) (map valueReparsec xs)
-    FMap f valueParser -> fmap f (valueReparsec valueParser)
+    FMapValue f valueParser -> fmap f (valueReparsec valueParser)
     Object objectParser ->
       around EventObjectStart EventObjectEnd (objectReparsec objectParser)
     Array valueParser ->
@@ -112,3 +118,14 @@ valueReparsec =
             Right v -> pure v
             Left err -> failWith (UserParseError err)
         els -> failWith (ExpectedScalarButGot els)
+
+--------------------------------------------------------------------------------
+-- Conduits
+
+-- | Run an object parser on an event stream.
+objectSink :: ObjectParser a -> ConduitT Event o m a
+objectSink = undefined
+
+-- | Run an value parser on an event stream.
+valueSink :: ValueParser a -> ConduitT Event o m a
+valueSink = undefined

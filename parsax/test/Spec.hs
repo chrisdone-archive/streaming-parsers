@@ -19,7 +19,8 @@ spec = do
     "Empty stream"
     (it
        "Empty input"
-       (shouldBe (runConduitPure (CL.sourceList [] .| objectSink (Pure ()))) ()))
+       (do pending
+           shouldBe (runConduitPure (CL.sourceList [] .| objectSink (Pure ()))) ()))
   describe
     "Reparsec"
     (do describe
