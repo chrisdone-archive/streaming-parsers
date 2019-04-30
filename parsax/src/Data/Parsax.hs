@@ -82,6 +82,7 @@ objectReparsec = undefined
 valueReparsec :: ValueParser a -> Parser [Event] ParseError a
 valueReparsec =
   \case
+    AltValue xs -> foldr1 (<>) (map valueReparsec xs)
     FMap f valueParser -> fmap f (valueReparsec valueParser)
     Object objectParser ->
       around EventObjectStart EventObjectEnd (objectReparsec objectParser)
