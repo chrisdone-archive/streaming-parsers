@@ -27,14 +27,14 @@ digit = do
   c <- nextElement
   if isDigit c
     then pure c
-    else Parser (\mi _done failed -> failed mi nonDigitError)
+    else failWith nonDigitError
 
 letter :: (NoMoreInput e, NonLetterError e) => Parser [Char] e Char
 letter = do
   c <- nextElement
   if isLetter c
     then pure c
-    else Parser (\mi _done failed -> failed mi nonLetterError)
+    else failWith nonLetterError
 
 letters :: (NoMoreInput e, NonLetterError e, Semigroup e) =>  Parser [Char] e [Char]
 letters = do

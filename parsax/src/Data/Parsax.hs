@@ -7,14 +7,26 @@
 module Data.Parsax
   ( objectSink
   , valueSink
+  , objectReparsec
+  , valueReparsec
   , Event(..)
   , ObjectParser(..)
   , ValueParser (..)
+  , ParseError (..)
   ) where
 
 import Data.ByteString (ByteString)
 import Data.Conduit
+import Data.Reparsec
+import Data.Reparsec.List
 import Data.Text (Text)
+
+data ParseError
+  = UserParseError !Text
+  | NoMoreInput
+  deriving (Show, Eq)
+
+instance NoMoreInput ParseError where noMoreInputError = NoMoreInput
 
 -- | A SAX event, containing either a scalar, array or object with keys.
 data Event
@@ -49,3 +61,19 @@ objectSink =
 -- | Run an value parser on an event stream.
 valueSink :: ValueParser a -> ConduitT Event o m a
 valueSink = undefined
+
+-- | Make a reparsec out of an object parser.
+objectReparsec :: ObjectParser a -> Parser [Event] ParseError a
+objectReparsec = undefined
+
+-- | Make a reparsec out of an value parser.
+valueReparsec :: ValueParser a -> Parser [Event] ParseError a
+valueReparsec =
+  \case
+    Scalar parse -> do
+      event <- nextElement
+      case event of
+        EventScalar bs ->
+          case parse bs of
+            Right v -> pure v
+            Left err -> failWith (UserParseError err)

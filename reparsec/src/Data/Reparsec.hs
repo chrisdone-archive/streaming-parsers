@@ -4,6 +4,7 @@
 
 module Data.Reparsec
   ( parseOnly
+  , failWith
   , Parser(..)
   , Result(..)
   -- Error handling
@@ -82,3 +83,7 @@ class NoMoreInput e where
 -- | A parser expected to reach end of input, but didn't.
 class ExpectedEndOfInput e where
   expectedEndOfInputError :: e
+
+-- | Fail the parser with the given error.
+failWith :: e -> Parser i e a
+failWith e = Parser (\mi _done failed -> failed mi e)
