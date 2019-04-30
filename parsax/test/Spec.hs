@@ -90,19 +90,39 @@ spec = do
                    (parseOnly
                       (valueReparsec
                          (Object
-                            ((,) <$> Field "y" (Scalar (const (pure 1))) <*>
+
+                            ((,) <$>
+                             Field
+
+                               "y"
+                               (Scalar (first T.pack . readEither . S8.unpack)) <*>
                              (Field
                                 "x"
-                                (Array (Scalar (first T.pack . readEither . S8.unpack) <>
-                                        Scalar (const (pure 4)))) <>
-                              Field "z" (Scalar (const (pure [3])))))))
+                                (Array
+                                   (fmap
+                                      Left
+                                      (Scalar
+                                         (first T.pack . readEither . S8.unpack)) <>
+                                    fmap
+                                      Right
+                                      (Object
+                                         (Field
+                                            "location"
+                                            (Scalar
+                                               (first T.pack .
+                                                readEither . S8.unpack)))))) <>
+                              Field "z" (Scalar (const (pure [Left 3])))))))
                       [ EventObjectStart
                       , EventObjectKey "x"
                       , EventArrayStart
                       , EventScalar "1"
+                      , EventObjectStart
+                      , EventObjectKey "location"
+                      , EventScalar "666"
+                      , EventObjectEnd
                       , EventArrayEnd
                       , EventObjectKey "y"
                       , EventScalar "2"
                       , EventObjectEnd
                       ])
-                   (Right (1 :: Int, [4 :: Int])))))
+                   (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)])))))
