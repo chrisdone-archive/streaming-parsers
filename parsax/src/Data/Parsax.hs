@@ -54,8 +54,14 @@ data Event
 data ObjectParser a
   = Field Text (Maybe a) (ValueParser a)
   | forall b c. LiftA2 (b -> c -> a) (ObjectParser b) (ObjectParser c)
-  | Alternative (NonEmpty (ObjectParser a))
+  | AltObject (NonEmpty (ObjectParser a))
   | Pure a
+
+instance Semigroup (ObjectParser a) where
+  AltObject xs <> AltObject ys = AltObject (xs <> ys)
+  AltObject xs <> y = AltObject (xs <> (y :| []))
+  x <> AltObject ys = AltObject ((x :| []) <> ys)
+  x <> y = AltObject (x :| [y])
 
 -- | Parser of a value.
 data ValueParser a where
@@ -64,6 +70,12 @@ data ValueParser a where
   Array :: ValueParser a -> ValueParser [a]
   FMap :: (x -> a) -> ValueParser x -> ValueParser a
   AltValue :: NonEmpty (ValueParser a) -> ValueParser a
+
+instance Semigroup (ValueParser a) where
+  AltValue xs <> AltValue ys = AltValue (xs <> ys)
+  AltValue xs <> y = AltValue (xs <> (y :| []))
+  x <> AltValue ys = AltValue ((x :| []) <> ys)
+  x <> y = AltValue (x :| [y])
 
 -- | Run an object parser on an event stream.
 objectSink :: ObjectParser a -> ConduitT Event o m a
