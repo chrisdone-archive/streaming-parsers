@@ -53,15 +53,16 @@ data Event
 data ObjectParser a
   = Field Text (Maybe a) (ValueParser a)
   | forall b c. LiftA2 (b -> c -> a) (ObjectParser b) (ObjectParser c)
+  | Alternative [ObjectParser a]
   | Pure a
-  | Alternative (ObjectParser a) (ObjectParser a)
 
 -- | Parser of a value.
 data ValueParser a where
   Scalar :: (ByteString -> Either Text a) -> ValueParser a
   Object :: ObjectParser a -> ValueParser a
   Array :: ValueParser a -> ValueParser [a]
-  Map :: (x -> a) -> ValueParser x -> ValueParser a
+  FMap :: (x -> a) -> ValueParser x -> ValueParser a
+  AltValue :: [ValueParser a] -> ValueParser a
 
 -- | Run an object parser on an event stream.
 objectSink :: ObjectParser a -> ConduitT Event o m a
@@ -81,6 +82,14 @@ objectReparsec = undefined
 valueReparsec :: ValueParser a -> Parser [Event] ParseError a
 valueReparsec =
   \case
+    FMap f valueParser -> fmap f (valueReparsec valueParser)
+    Object objectParser ->
+      around EventObjectStart EventObjectEnd (objectReparsec objectParser)
+    Array valueParser ->
+      around
+        EventArrayStart
+        EventArrayEnd
+        (zeroOrMore (valueReparsec valueParser))
     Scalar parse -> do
       event <- nextElement
       case event of
@@ -89,7 +98,3 @@ valueReparsec =
             Right v -> pure v
             Left err -> failWith (UserParseError err)
         els -> failWith (ExpectedScalarButGot els)
-    Object objectParser ->
-      around EventObjectStart EventObjectEnd (objectReparsec objectParser)
-    Array valueParser ->
-      around EventArrayStart EventArrayEnd (zeroOrMore (valueReparsec valueParser))
