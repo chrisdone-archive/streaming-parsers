@@ -22,22 +22,36 @@ spec = do
        (shouldBe (runConduitPure (CL.sourceList [] .| objectSink (Pure ()))) ()))
   describe
     "Reparsec"
-    (do it
+    (do describe
           "Value"
-          (shouldBe
-             (parseOnly
-                (valueReparsec (Scalar (const (pure 1))))
-                [EventScalar "1"])
-             (Right (1 :: Int)))
-        it
-          "Value no input"
-          (shouldBe
-             (parseOnly (valueReparsec (Scalar (const (pure (1 :: Int))))) [])
-             (Left NoMoreInput))
-        it
-          "Value user parse error"
-          (shouldBe
-             (parseOnly
-                (valueReparsec (Scalar (first T.pack . readEither . S8.unpack)))
-                [EventScalar "a"])
-             (Left (UserParseError "Prelude.read: no parse") :: Either ParseError Int)))
+          (do it
+                "Value"
+                (shouldBe
+                   (parseOnly
+                      (valueReparsec (Scalar (const (pure 1))))
+                      [EventScalar "1"])
+                   (Right (1 :: Int)))
+              it
+                "Value no input"
+                (shouldBe
+                   (parseOnly
+                      (valueReparsec (Scalar (const (pure (1 :: Int)))))
+                      [])
+                   (Left NoMoreInput))
+              it
+                "Value user parse error"
+                (shouldBe
+                   (parseOnly
+                      (valueReparsec
+                         (Scalar (first T.pack . readEither . S8.unpack)))
+                      [EventScalar "a"])
+                   (Left (UserParseError "Prelude.read: no parse") :: Either ParseError Int)))
+        describe
+          "Array"
+          (do it
+                "Array"
+                (shouldBe
+                   (parseOnly
+                      (valueReparsec (Array (Scalar (const (pure 1)))))
+                      [EventArrayStart, EventScalar "1", EventArrayEnd])
+                   (Right [1 :: Int]))))

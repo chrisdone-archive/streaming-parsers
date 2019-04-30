@@ -1,8 +1,9 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Main where
 
 import Data.Reparsec.List
 import Data.Reparsec.List.Char
-import Test.Hspec
+import Test.Hspec hiding (around)
 import Data.Reparsec
 
 data ParseError
@@ -11,9 +12,11 @@ data ParseError
   | NonLetter
   | ExpectedEof
   | Errors [ParseError]
+  | UnexpectedToken Char
   deriving (Eq, Show)
 
 instance NoMoreInput ParseError where noMoreInputError = EndOfInput
+instance UnexpectedToken Char ParseError where unexpectedToken = UnexpectedToken
 instance NonDigitError ParseError where nonDigitError = NonDigit
 instance NonLetterError ParseError where nonLetterError = NonLetter
 instance ExpectedEndOfInput ParseError where expectedEndOfInputError = ExpectedEof
@@ -53,10 +56,21 @@ spec = do
              (Right "abc"))
         it
           "With end of input"
-          (shouldBe (parseOurs (letter <* endOfInput) "a") (Right 'a')))
+          (shouldBe (parseOurs (letter <* endOfInput) "a") (Right 'a'))
+        it
+          "Zero or more"
+          (shouldBe (parseOurs (zeroOrMore letter) "a") (Right "a"))
+        it
+          "Around"
+          (shouldBe (parseOurs (around 'a' '1' (pure ())) "a1") (Right ())))
   describe
     "Erroneous input"
     (do it
+          "Around fail"
+          (shouldBe
+             (parseOurs (around 'a' '1' (pure ())) "a2")
+             (Left (UnexpectedToken '2')))
+        it
           "Exclamation points"
           (shouldBe
              (parseOurs (letters <> digits) "!!!")

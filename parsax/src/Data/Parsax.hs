@@ -26,7 +26,14 @@ data ParseError
   = UserParseError !Text
   | NoMoreInput
   | UnexpectedEvent !Event
+  | Errors [ParseError]
   deriving (Show, Eq)
+
+instance Semigroup ParseError where
+  Errors xs <> Errors ys = Errors (xs <> ys)
+  Errors xs <> y = Errors (xs <> [y])
+  x <> Errors ys = Errors ([x] <> ys)
+  x <> y = Errors [x,y]
 
 instance NoMoreInput ParseError where noMoreInputError = NoMoreInput
 instance UnexpectedToken Event ParseError where unexpectedToken = UnexpectedEvent
@@ -34,8 +41,8 @@ instance UnexpectedToken Event ParseError where unexpectedToken = UnexpectedEven
 -- | A SAX event, containing either a scalar, array or object with keys.
 data Event
   = EventScalar !ByteString
-  | EventSequenceStart
-  | EventSequenceEnd
+  | EventArrayStart
+  | EventArrayEnd
   | EventObjectStart
   | EventObjectKey !ByteString
   | EventObjectEnd
@@ -52,7 +59,7 @@ data ObjectParser a
 data ValueParser a where
   Scalar :: (ByteString -> Either Text a) -> ValueParser a
   Object :: ObjectParser a -> ValueParser a
-  List :: ValueParser a -> ValueParser [a]
+  Array :: ValueParser a -> ValueParser [a]
   Map :: (x -> a) -> ValueParser x -> ValueParser a
 
 -- | Run an object parser on an event stream.
@@ -80,13 +87,8 @@ valueReparsec =
           case parse bs of
             Right v -> pure v
             Left err -> failWith (UserParseError err)
-
---------------------------------------------------------------------------------
--- Helpers
-
-around ::
-     Event
-  -> Event
-  -> Parser [Event] ParseError a
-  -> Parser [Event] ParseError a
-around before after inner = expect before *> inner <* expect after
+        els -> error (show els)
+    Object objectParser ->
+      around EventObjectStart EventObjectEnd (objectReparsec objectParser)
+    Array valueParser ->
+      around EventArrayStart EventArrayEnd (zeroOrMore (valueReparsec valueParser))

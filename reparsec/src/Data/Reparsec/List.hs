@@ -1,12 +1,24 @@
+{-# LANGUAGE BangPatterns #-}
 -- | Parsing from an input list.
 
 module Data.Reparsec.List
   ( nextElement
   , endOfInput
   , expect
+  , around
+  , zeroOrMore
   ) where
 
 import Data.Reparsec
+
+-- | Wrap around something.
+around ::
+     (UnexpectedToken a1 e, NoMoreInput e, Eq a1)
+  => a1
+  -> a1
+  -> Parser [a1] e a2
+  -> Parser [a1] e a2
+around before after inner = expect before *> inner <* expect after
 
 -- | Expect an element.
 expect :: (UnexpectedToken a e, NoMoreInput e, Eq a) => a -> Parser [a] e ()
@@ -39,3 +51,12 @@ endOfInput =
                Nothing -> done Nothing ()
         in go mi0)
 {-# INLINABLE endOfInput #-}
+
+-- | Try to extract the next element from the input.
+zeroOrMore :: Semigroup e => Parser [t] e a -> Parser [t] e [a]
+zeroOrMore elementParser = do
+  result <- fmap Just elementParser <> pure Nothing
+  case result of
+    Nothing -> pure []
+    Just element -> fmap (element :) (zeroOrMore elementParser)
+{-# INLINABLE zeroOrMore #-}
