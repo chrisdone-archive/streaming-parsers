@@ -1,4 +1,4 @@
-# resumable-parser
+# reparsec
 
 A simple resumable parser.
 
