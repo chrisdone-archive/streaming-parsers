@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
@@ -15,17 +16,20 @@ module Data.Parsax
   , ParseError (..)
   ) where
 
+import           Control.Alternative.Free
 import           Control.Applicative
+import           Control.Monad.IO.Class
+import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import           Data.Conduit
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import           Data.Maybe
 import           Data.Reparsec
 import           Data.Reparsec.List
 import           Data.Text (Text)
-import           Data.Vault.ST.Strict (Vault)
-import qualified Data.Vault.ST.Strict as Vault
+import qualified Data.Vault.Strict as Vault
 
 --------------------------------------------------------------------------------
 -- Types
@@ -38,6 +42,9 @@ data ParseError
   | UnexpectedEvent !Event
   | Errors [ParseError]
   | ExpectedScalarButGot !Event
+  | ExpectedObjectKeyOrEndOfObject
+  | NoSuchKey
+  | AltError !String
   deriving (Show, Eq)
 
 instance Semigroup ParseError where
@@ -98,9 +105,21 @@ valueReparsec =
     PureValue a -> pure a
     AltValue (x :| xs) -> foldr (<>) (valueReparsec x) (map valueReparsec xs)
     FMapValue f valueParser -> fmap f (valueReparsec valueParser)
-    Object objectParser ->
-      around EventObjectStart EventObjectEnd (do objectReparsec objectParser
-                                                 undefined)
+    Object objectParser -> do
+      expect EventObjectStart
+      let loop msm = do
+            event <- nextElement
+            case event of
+              EventObjectKey key -> do
+                msm' <- objectReparsec msm key
+                loop msm'
+              EventObjectEnd -> pure (finishObjectSM msm)
+              _ -> failWith ExpectedObjectKeyOrEndOfObject
+      mappingSM <- liftIO (toMappingSM objectParser)
+      result <- loop mappingSM
+      case result of
+        Left stringError -> failWith (AltError stringError)
+        Right a -> pure a
     Array valueParser ->
       around
         EventArrayStart
@@ -116,40 +135,22 @@ valueReparsec =
         els -> failWith (ExpectedScalarButGot els)
 
 -- | Make a reparsec out of an object parser.
-objectReparsec :: ObjectParser a -> Parser [Event] ParseError (Vault s -> Vault s)
-objectReparsec objectParser = do
-  event <- nextElement
-  case event of
-    EventObjectKey key ->
-      case M.lookup key keyParsers of
-        Nothing ->
-          error "No parser for that key... Could this be typesystemed away?"
-        Just (x :| xs) -> foldr (<>) (makeAttempt x) (map makeAttempt xs)
+objectReparsec :: MappingSM a -> Text -> Parser [Event] ParseError (MappingSM a)
+objectReparsec msm textKey = do
+  case M.lookup textKey (msmParsers msm) of
+    Nothing ->
+      error "No parser for that key... Could this be typesystemed away?"
+    Just (x :| xs) -> do
+      updateVault <- foldr (<>) (makeAttempt x) (map makeAttempt xs)
+      pure
+        msm
+          { msmParsers = M.delete textKey (msmParsers msm)
+          , msmVault = updateVault (msmVault msm)
+          }
   where
-    keyParsers = objectParserMap objectParser
-    makeAttempt (SomeParser key valueParser) = do
-      x <- valueReparsec valueParser
-      pure (Vault.insert key x)
-
---------------------------------------------------------------------------------
--- Object alternative
-
--- -- | Make a reparsec out of an object parser.
--- objectKeyParser :: Text -> ObjectParser a -> Either ParseError a
--- objectKeyParser key =
---   \case
---     PureObject a -> pure a
---     AltObject (x :| xs) -> foldr (<|>) (objectAlt x) (map objectAlt xs)
---     FMapObject f objectParser -> fmap f (objectAlt objectParser)
---     LiftA2 f objectParser1 objectParser2 ->
---       liftA2 f (objectAlt objectParser1) (objectAlt objectParser2)
---     Field key valueParser -> undefined
-
-objectParserMap :: ObjectParser a -> Map Text (NonEmpty (SomeParser s))
-objectParserMap = undefined
-
-data SomeParser s =
-  forall a. SomeParser (Vault.Key s a) (ValueParser a)
+    makeAttempt (ParserPair (EitherKey key) valueParser) = do
+      result <- valueReparsec valueParser
+      pure (Vault.insert key (Right result))
 
 --------------------------------------------------------------------------------
 -- Conduits
@@ -161,3 +162,47 @@ objectSink = undefined
 -- | Run an value parser on an event stream.
 valueSink :: ValueParser a -> ConduitT Event o m a
 valueSink = undefined
+
+--------------------------------------------------------------------------------
+-- MSM
+
+newtype EitherKey a = EitherKey (Vault.Key (Either String a))
+
+data ParserPair where
+  ParserPair :: EitherKey a -> ValueParser a -> ParserPair
+
+data MappingSM a = MappingSM
+  { msmAlts :: !(Alt EitherKey a)
+  , msmParsers :: !(Map Text (NonEmpty ParserPair))
+  , msmVault :: !Vault.Vault
+  }
+
+toMappingSM :: ObjectParser a -> IO (MappingSM a)
+toMappingSM mp = do
+  (alts, parsers) <- runStateT (go mp) mempty
+  pure MappingSM {msmAlts = alts, msmParsers = parsers, msmVault = Vault.empty}
+  where
+    go :: ObjectParser a -> StateT (Map Text (NonEmpty ParserPair)) IO (Alt EitherKey a)
+    go (PureObject a) = pure $ pure a
+    go (FMapObject f x) = do
+      x' <- go x
+      pure $ fmap f x'
+    go (LiftA2 f a b) = do
+      a' <- go a
+      b' <- go b
+      pure $ liftA2 f a' b'
+    go (AltObject (x :| xs)) = do
+      x' <- go x
+      xs' <- mapM go xs
+      pure $ foldr (<|>) x' xs'
+    go (Field t p) = do
+      key <- liftIO $ EitherKey <$> Vault.newKey
+      let pp = ParserPair key p
+      modify' $ M.insertWith (<>) t (pp :| [])
+      pure $ Alt [Ap key (pure id)]
+
+finishObjectSM :: MappingSM b -> Either String b
+finishObjectSM msm = runAlt go (msmAlts msm)
+  where
+    go :: forall a. EitherKey a -> Either String a
+    go (EitherKey key) = fromMaybe (Left "not found") $ Vault.lookup key (msmVault msm)
