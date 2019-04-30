@@ -54,7 +54,7 @@ data Event
 data ObjectParser a
   = Field Text (Maybe a) (ValueParser a)
   | forall b c. LiftA2 (b -> c -> a) (ObjectParser b) (ObjectParser c)
-  | Alternative [ObjectParser a]
+  | Alternative (NonEmpty (ObjectParser a))
   | Pure a
 
 -- | Parser of a value.
