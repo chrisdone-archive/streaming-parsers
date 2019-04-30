@@ -66,8 +66,13 @@ spec = do
         it
           "Zero or more: with different following token"
           (shouldBe
-             (parseOurs (zeroOrMore (letter <* digit)) "a1b2!")
-             (Right "ab"))
+             (parseOurs (zeroOrMore (letter <* digit)) "a1c2!")
+             (Right "ac"))
+        it
+          "Zero or more: with different following token"
+          (shouldBe
+             (parseOurs (zeroOrMore (letter <* digit)) "a1_2!")
+             (Right "a"))
         it
           "Around"
           (shouldBe (parseOurs (around 'a' '1' (pure ())) "a1") (Right ())))
