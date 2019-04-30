@@ -27,6 +27,7 @@ data ParseError
   | NoMoreInput
   | UnexpectedEvent !Event
   | Errors [ParseError]
+  | ExpectedScalarButGot !Event
   deriving (Show, Eq)
 
 instance Semigroup ParseError where
@@ -87,7 +88,7 @@ valueReparsec =
           case parse bs of
             Right v -> pure v
             Left err -> failWith (UserParseError err)
-        els -> error (show els)
+        els -> failWith (ExpectedScalarButGot els)
     Object objectParser ->
       around EventObjectStart EventObjectEnd (objectReparsec objectParser)
     Array valueParser ->
