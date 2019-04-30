@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GADTs #-}
@@ -30,6 +32,7 @@ import           Data.Reparsec
 import           Data.Reparsec.List
 import           Data.Text (Text)
 import qualified Data.Vault.Strict as Vault
+import           System.IO.Unsafe
 
 --------------------------------------------------------------------------------
 -- Types
@@ -42,7 +45,7 @@ data ParseError
   | UnexpectedEvent !Event
   | Errors [ParseError]
   | ExpectedScalarButGot !Event
-  | ExpectedObjectKeyOrEndOfObject
+  | ExpectedObjectKeyOrEndOfObject !Event
   | NoSuchKey
   | AltError !String
   deriving (Show, Eq)
@@ -74,6 +77,13 @@ data ObjectParser a where
   AltObject :: (NonEmpty (ObjectParser a)) -> ObjectParser a
   PureObject :: a -> ObjectParser a
 
+instance Functor ObjectParser where
+  fmap = FMapObject
+
+instance Applicative ObjectParser where
+  liftA2 = LiftA2
+  pure = PureObject
+
 instance Semigroup (ObjectParser a) where
   AltObject xs <> AltObject ys = AltObject (xs <> ys)
   AltObject xs <> y = AltObject (xs <> (y :| []))
@@ -88,6 +98,9 @@ data ValueParser a where
   FMapValue :: (x -> a) -> ValueParser x -> ValueParser a
   AltValue :: NonEmpty (ValueParser a) -> ValueParser a
   PureValue :: a -> ValueParser a
+
+instance Functor ValueParser where
+  fmap = FMapValue
 
 instance Semigroup (ValueParser a) where
   AltValue xs <> AltValue ys = AltValue (xs <> ys)
@@ -114,8 +127,8 @@ valueReparsec =
                 msm' <- objectReparsec msm key
                 loop msm'
               EventObjectEnd -> pure (finishObjectSM msm)
-              _ -> failWith ExpectedObjectKeyOrEndOfObject
-      mappingSM <- liftIO (toMappingSM objectParser)
+              ev -> failWith (ExpectedObjectKeyOrEndOfObject ev)
+      let !mappingSM = unsafePerformIO (toMappingSM objectParser) -- Needs liftIO
       result <- loop mappingSM
       case result of
         Left stringError -> failWith (AltError stringError)
@@ -139,7 +152,7 @@ objectReparsec :: MappingSM a -> Text -> Parser [Event] ParseError (MappingSM a)
 objectReparsec msm textKey = do
   case M.lookup textKey (msmParsers msm) of
     Nothing ->
-      error "No parser for that key... Could this be typesystemed away?"
+      pure msm
     Just (x :| xs) -> do
       updateVault <- foldr (<>) (makeAttempt x) (map makeAttempt xs)
       pure
