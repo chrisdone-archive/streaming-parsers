@@ -115,6 +115,17 @@ spec = do
                 _ -> False)
              True)
         it
+          "Fed input"
+          (shouldBe
+             (case parseOursPartial (letter *> letter) "a" of
+                Done {} -> True
+                Partial continue ->
+                  case runIdentity (continue (Just "b")) of
+                    Done {} -> True
+                    _ -> False
+                _ -> False)
+             True)
+        it
           "Failure"
           (shouldBe
              (case parseOursPartial (letter *> letter) "a2" of
