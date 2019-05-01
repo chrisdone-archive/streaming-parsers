@@ -114,7 +114,7 @@ spec = do
           (shouldBe
              (runST
                 (runConduit
-                   (CL.sourceList (toList stackLikeInputs) .|
+                   (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
                     valueSink stackLikeGrammar)))
              stackLikeResult)))
   where
@@ -146,6 +146,23 @@ spec = do
 stackLikeResult :: Either a (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
 
+stackLikeInputsWithBogusFields :: Seq Event
+stackLikeInputsWithBogusFields =
+  [EventObjectStart, EventObjectKey "wibble"] <> stackLikeInputs <>
+  [ EventObjectKey "x"
+  , EventArrayStart
+  , EventScalar "1"
+  , EventObjectStart
+  , EventObjectKey "location"
+  , EventScalar "666"
+  , EventObjectEnd
+  , EventArrayEnd
+  , EventObjectKey "y"
+  , EventScalar "2"
+  , EventObjectEnd
+  , EventScalar "IGNORED"
+  ]
+
 stackLikeInputs :: Seq Event
 stackLikeInputs =
   [ EventObjectStart
@@ -160,7 +177,6 @@ stackLikeInputs =
   , EventObjectKey "y"
   , EventScalar "2"
   , EventObjectEnd
-  , EventScalar "IGNORED"
   ]
 
 stackLikeGrammar :: ValueParser (Int, [Either Int Int])

@@ -13,7 +13,9 @@
 module Data.Parsax
   ( valueSink
   , valueReparsec
-  , ignoreKeys
+  , enforceSchema
+  , valueParserSchema
+  , Schema(..)
   , Event(..)
   , ObjectParser(..)
   , ValueParser (..)
@@ -29,6 +31,7 @@ import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import           Data.Conduit
 import           Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NE
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import           Data.Maybe
@@ -222,7 +225,8 @@ finishObjectSM msm = runAlt go (msmAlts msm)
 valueSink ::
      PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a)
 valueSink valueParser =
-  ignoreKeys valueParser .| loop (parseResultT (valueReparsec valueParser))
+  enforceSchema (Just (valueParserSchema valueParser)) .|
+  loop (parseResultT (valueReparsec valueParser))
   where
     loop parser = do
       mevent <- await
@@ -237,6 +241,114 @@ valueSink valueParser =
           mapM_ leftover (Seq.drop pos remaining)
           pure (Right a)
 
--- | Ignore all uninteresting keys in objects.
-ignoreKeys :: Monad m => ValueParser a -> ConduitT Event Event m ()
-ignoreKeys _ = awaitForever yield
+--------------------------------------------------------------------------------
+-- Schema enforcing
+
+data Schema =
+  Schema
+    { schemaScalar :: Bool
+    , schemaObject :: Map Text Schema
+    , schemaArray :: Maybe Schema
+    }
+
+instance Semigroup Schema where
+  (<>) = mappend
+
+instance Monoid Schema where
+  mappend s1 s2 =
+    Schema
+      { schemaScalar = schemaScalar s1 || schemaScalar s2
+      , schemaObject = M.unionWith mappend (schemaObject s1) (schemaObject s2)
+      , schemaArray = mappend (schemaArray s1) (schemaArray s2)
+      }
+  mempty =
+    Schema {schemaScalar = False, schemaObject = mempty, schemaArray = mempty}
+
+-- | Create a schema out of a value parser.
+valueParserSchema :: ValueParser a -> Schema
+valueParserSchema =
+  \case
+    Scalar {} -> mempty {schemaScalar = True}
+    Object objectParser -> mempty {schemaObject = objectParserSchema objectParser}
+    Array valueParser -> mempty { schemaArray = Just (valueParserSchema valueParser)}
+    FMapValue _ v -> valueParserSchema v
+    PureValue {} -> mempty
+    AltValue choices -> foldMap valueParserSchema (NE.toList choices)
+
+-- | Create a schema out of an object parser.
+objectParserSchema :: ObjectParser a -> Map Text Schema
+objectParserSchema = go
+  where
+    go :: ObjectParser a -> Map Text Schema
+    go =
+      \case
+        Field key valueParser ->
+          M.singleton key (valueParserSchema valueParser)
+        LiftA2 _ x y -> M.unionWith (<>) (go x) (go y)
+        FMapObject _ x -> go x
+        PureObject {} -> mempty
+        AltObject choices -> foldMap go choices
+
+enforceSchema :: Monad m => Maybe Schema -> ConduitT Event Event m ()
+enforceSchema mschema = do
+  mnext <- await
+  case mnext of
+    Just event@(EventScalar {}) ->
+      case fmap schemaScalar mschema of
+        Just True -> yield event
+        Just False -> error "Scalars not allowed here."
+        _ -> pure ()
+    Just ev@EventObjectStart {} ->
+      case fmap schemaObject mschema of
+        Just obj
+          | not (M.null obj) -> do
+            yield ev
+            let loop = do
+                  mnext1 <- await
+                  case mnext1 of
+                    Just e@EventObjectEnd -> yield e
+                    Just e@(EventObjectKey key) ->
+                      yield e *> enforceSchema (M.lookup key obj) *> loop
+                    _ ->
+                      error
+                        "Expected only object end or object key here. (Ignored value)"
+             in loop
+        Nothing ->
+          let loop = do
+                mnext1 <- await
+                case mnext1 of
+                  Just EventObjectEnd -> pure ()
+                  Just (EventObjectKey {}) -> enforceSchema Nothing *> loop
+                  _ ->
+                    error
+                      "Expected only object end or object key here. (Ignored value)"
+           in loop
+        _ -> error "Objects not allowed here."
+    Just ev@EventArrayStart ->
+      case fmap schemaArray mschema of
+        Just Nothing -> error "Arrays not allowed here."
+        Just (Just schema) -> do
+          yield ev
+          let loop = do
+                mnext1 <- await
+                case mnext1 of
+                  Just e@EventArrayEnd -> yield e
+                  Just next -> do
+                    leftover next
+                    enforceSchema (Just schema)
+                    loop
+                  _ -> error "Expected only array end or array value here."
+           in loop
+        Nothing ->
+          let loop = do
+                mnext1 <- await
+                case mnext1 of
+                  Just EventArrayEnd -> pure ()
+                  Just next -> do
+                    leftover next
+                    enforceSchema Nothing
+                    loop
+                  _ -> error "Expected only array end or array value here."
+           in loop
+    Nothing -> pure ()
+    Just _ -> error ("Unexpected non-starting or scalar here: " ++ show mnext)
