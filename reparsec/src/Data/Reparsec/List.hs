@@ -16,12 +16,12 @@ around ::
      (UnexpectedToken a1 e, NoMoreInput e, Eq a1, Monad m)
   => a1
   -> a1
-  -> ParserT m [a1] e a2
-  -> ParserT m [a1] e a2
+  -> ParserT [a1] e m a2
+  -> ParserT [a1] e m a2
 around before after inner = expect before *> inner <* expect after
 
 -- | Expect an element.
-expect :: (UnexpectedToken a e, NoMoreInput e, Eq a, Monad m) => a -> ParserT m [a] e ()
+expect :: (UnexpectedToken a e, NoMoreInput e, Eq a, Monad m) => a -> ParserT [a] e m ()
 expect a = do
   a' <- nextElement
   if a == a'
@@ -29,7 +29,7 @@ expect a = do
     else failWith (unexpectedToken a')
 
 -- | Try to extract the next element from the input.
-nextElement :: (NoMoreInput e, Monad m) => ParserT m [a] e a
+nextElement :: (NoMoreInput e, Monad m) => ParserT [a] e m a
 nextElement =
   ParserT (\mi0 done failed ->
        let go mi =
@@ -41,7 +41,7 @@ nextElement =
 {-# INLINABLE nextElement #-}
 
 -- | Expect the end of input.
-endOfInput :: (ExpectedEndOfInput e, Monad m) => ParserT m [a] e ()
+endOfInput :: (ExpectedEndOfInput e, Monad m) => ParserT [a] e m ()
 endOfInput =
   ParserT (\mi0 done failed ->
        let go mi =
@@ -53,7 +53,7 @@ endOfInput =
 {-# INLINABLE endOfInput #-}
 
 -- | Try to extract the next element from the input.
-zeroOrMore :: (Semigroup e, Monad m) => ParserT m [t] e a -> ParserT m [t] e [a]
+zeroOrMore :: (Semigroup e, Monad m) => ParserT [t] e m a -> ParserT [t] e m [a]
 zeroOrMore elementParser = do
   result <- fmap Just elementParser <> pure Nothing
   case result of

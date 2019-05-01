@@ -22,7 +22,7 @@ import Control.Monad
 
 -- | A parser. Takes as input maybe a value. Nothing terminates the
 -- input. Takes two continuations: one for success and one for failure.
-newtype ParserT m input error value = ParserT
+newtype ParserT input error m value = ParserT
   { runParserT :: forall result.
                   Maybe input
                -> (Maybe input -> value -> m (Result m input error result))
@@ -30,7 +30,7 @@ newtype ParserT m input error value = ParserT
                -> m (Result m input error result)
   }
 
-instance Monad m => Monad (ParserT m i e) where
+instance Monad m => Monad (ParserT i e m) where
   return x = ParserT (\mi done _failed -> done mi x)
   {-# INLINABLE return #-}
   m >>= f =
@@ -39,13 +39,13 @@ instance Monad m => Monad (ParserT m i e) where
          runParserT m mi (\mi' v -> runParserT (f v) mi' done failed) failed)
   {-# INLINABLE (>>=) #-}
 
-instance Monad m => Applicative (ParserT m i e) where
+instance Monad m => Applicative (ParserT i e m) where
   (<*>) = ap
   {-# INLINABLE (<*>) #-}
   pure = return
   {-# INLINABLE pure #-}
 
-instance Monad m => Functor (ParserT m i e) where
+instance Monad m => Functor (ParserT i e m) where
   fmap = liftM
   {-# INLINABLE fmap #-}
 
@@ -55,7 +55,7 @@ data Result m i e r
   | Failed !(Maybe i) !e
   | Partial (Maybe i -> m (Result m i e r))
 
-instance Semigroup e => Semigroup (ParserT m i e a) where
+instance Semigroup e => Semigroup (ParserT i e m a) where
   left <> right =
     ParserT
       (\mi done failed ->
@@ -70,7 +70,7 @@ instance Semigroup e => Semigroup (ParserT m i e a) where
 -- Entry points
 
 -- | Run the parser, terminating the input if it requests more.
-parseOnlyT :: Monad m => ParserT m i e a -> i -> m (Either e a)
+parseOnlyT :: Monad m => ParserT i e m a -> i -> m (Either e a)
 parseOnlyT p i =
   terminate
     (runParserT
@@ -88,7 +88,7 @@ parseOnlyT p i =
 
 -- | Run the parser on the input, allowing a partial result. Use this
 -- for \"streaming\" parsing.
-parseResultT :: Monad m => ParserT m i e a -> i -> m (Result m i e a)
+parseResultT :: Monad m => ParserT i e m a -> i -> m (Result m i e a)
 parseResultT p i =
   runParserT
     p
@@ -100,7 +100,7 @@ parseResultT p i =
 -- Combinators
 
 -- | Fail the parser with the given error.
-failWith :: e -> ParserT m i e a
+failWith :: e -> ParserT i e m a
 failWith e = ParserT (\mi _done failed -> failed mi e)
 
 --------------------------------------------------------------------------------

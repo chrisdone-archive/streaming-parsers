@@ -103,25 +103,29 @@ spec = do
           "Not enough input"
           (shouldBe
              (case parseOursPartial (letter *> letter) "a" of
-                Partial{} -> True
+                Partial {} -> True
                 _ -> False)
              True)
         it
           "Enough input"
           (shouldBe
              (case parseOursPartial (letter *> letter) "ab" of
-                Done{} -> True
+                Done {} -> True
                 _ -> False)
              True)
         it
           "Failure"
           (shouldBe
              (case parseOursPartial (letter *> letter) "a2" of
-                Failed{} -> True
+                Failed {} -> True
                 _ -> False)
              True))
   where
-    parseOurs :: ParserT Identity [Char] ParseError a -> [Char] -> Either ParseError a
+    parseOurs ::
+         ParserT [Char] ParseError Identity a -> [Char] -> Either ParseError a
     parseOurs p i = runIdentity (parseOnlyT p i)
-    parseOursPartial :: ParserT Identity [Char] ParseError a -> [Char] -> Result Identity [Char] ParseError a
+    parseOursPartial ::
+         ParserT [Char] ParseError Identity a
+      -> [Char]
+      -> Result Identity [Char] ParseError a
     parseOursPartial p i = runIdentity (parseResultT p i)

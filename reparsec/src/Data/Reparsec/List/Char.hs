@@ -22,27 +22,27 @@ class NonDigitError e where
 class NonLetterError e where
   nonLetterError :: e
 
-digit :: (NoMoreInput e, NonDigitError e, Monad m) => ParserT m [Char] e Char
+digit :: (NoMoreInput e, NonDigitError e, Monad m) => ParserT [Char] e m Char
 digit = do
   c <- nextElement
   if isDigit c
     then pure c
     else failWith nonDigitError
 
-letter :: (NoMoreInput e, NonLetterError e, Monad m) => ParserT m [Char] e Char
+letter :: (NoMoreInput e, NonLetterError e, Monad m) => ParserT [Char] e m Char
 letter = do
   c <- nextElement
   if isLetter c
     then pure c
     else failWith nonLetterError
 
-letters :: (NoMoreInput e, NonLetterError e, Semigroup e, Monad m) => ParserT m [Char] e [Char]
+letters :: (NoMoreInput e, NonLetterError e, Semigroup e, Monad m) => ParserT [Char] e m [Char]
 letters = do
   c <- letter
   d <- fmap Just letters <> pure Nothing
   pure (c : fromMaybe [] d)
 
-digits :: (NoMoreInput e , NonDigitError e, Semigroup e, Monad m) => ParserT m [Char] e [Char]
+digits :: (NoMoreInput e , NonDigitError e, Semigroup e, Monad m) => ParserT [Char] e m [Char]
 digits = do
   c <- digit
   d <- fmap Just digits <> pure Nothing
