@@ -13,6 +13,7 @@
 module Data.Parsax
   ( valueSink
   , valueReparsec
+  , ignoreKeys
   , Event(..)
   , ObjectParser(..)
   , ValueParser (..)
@@ -220,7 +221,8 @@ finishObjectSM msm = runAlt go (msmAlts msm)
 -- weren't consumed, in either success or failure case.
 valueSink ::
      PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a)
-valueSink valueParser = loop (parseResultT (valueReparsec valueParser))
+valueSink valueParser =
+  ignoreKeys valueParser .| loop (parseResultT (valueReparsec valueParser))
   where
     loop parser = do
       mevent <- await
@@ -234,3 +236,7 @@ valueSink valueParser = loop (parseResultT (valueReparsec valueParser))
         Done remaining pos _more a -> do
           mapM_ leftover (Seq.drop pos remaining)
           pure (Right a)
+
+-- | Ignore all uninteresting keys in objects.
+ignoreKeys :: Monad m => ValueParser a -> ConduitT Event Event m ()
+ignoreKeys _ = awaitForever yield
