@@ -22,7 +22,9 @@ library
                        containers,
                        vault,
                        free,
-                       transformers
+                       transformers,
+                       primitive,
+                       mtl
   default-language:    Haskell2010
 
 test-suite parsax-test

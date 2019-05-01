@@ -1,5 +1,7 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+import           Control.Monad.ST
 import           Data.Bifunctor
 import qualified Data.ByteString.Char8 as S8
 import           Data.Conduit
@@ -90,10 +92,8 @@ spec = do
                    (parseOnly
                       (valueReparsec
                          (Object
-
                             ((,) <$>
                              Field
-
                                "y"
                                (Scalar (first T.pack . readEither . S8.unpack)) <*>
                              (Field
@@ -126,3 +126,9 @@ spec = do
                       , EventObjectEnd
                       ])
                    (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)])))))
+  where
+    parseOnly ::
+         (forall s. ParserT [Event] ParseError (ST s) a)
+      -> [Event]
+      -> Either ParseError a
+    parseOnly p i = runST (parseOnlyT p i)

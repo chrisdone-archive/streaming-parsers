@@ -1,4 +1,6 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -20,7 +22,9 @@ module Data.Parsax
 
 import           Control.Alternative.Free
 import           Control.Applicative
-import           Control.Monad.IO.Class
+import           Control.Monad.Primitive
+import           Control.Monad.ST
+import           Control.Monad.Trans
 import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import           Data.Conduit
@@ -31,8 +35,7 @@ import           Data.Maybe
 import           Data.Reparsec
 import           Data.Reparsec.List
 import           Data.Text (Text)
-import qualified Data.Vault.Strict as Vault
-import           System.IO.Unsafe
+import qualified Data.Vault.ST.Strict as Vault
 
 --------------------------------------------------------------------------------
 -- Types
@@ -112,7 +115,7 @@ instance Semigroup (ValueParser a) where
 -- Reparsecs
 
 -- | Make a reparsec out of a value parser.
-valueReparsec :: ValueParser a -> Parser [Event] ParseError a
+valueReparsec :: PrimMonad m => ValueParser a -> ParserT [Event] ParseError m a
 valueReparsec =
   \case
     PureValue a -> pure a
@@ -128,7 +131,7 @@ valueReparsec =
                 loop msm'
               EventObjectEnd -> pure (finishObjectSM msm)
               ev -> failWith (ExpectedObjectKeyOrEndOfObject ev)
-      let !mappingSM = unsafePerformIO (toMappingSM objectParser) -- Needs liftIO
+      !mappingSM <- lift (stToPrim(toMappingSM objectParser))
       result <- loop mappingSM
       case result of
         Left stringError -> failWith (AltError stringError)
@@ -148,7 +151,7 @@ valueReparsec =
         els -> failWith (ExpectedScalarButGot els)
 
 -- | Make a reparsec out of an object parser.
-objectReparsec :: MappingSM a -> Text -> Parser [Event] ParseError (MappingSM a)
+objectReparsec :: PrimMonad m => MappingSM s a -> Text -> ParserT [Event] ParseError m (MappingSM s a)
 objectReparsec msm textKey = do
   case M.lookup textKey (msmParsers msm) of
     Nothing ->
@@ -179,23 +182,25 @@ valueSink = undefined
 --------------------------------------------------------------------------------
 -- MSM
 
-newtype EitherKey a = EitherKey (Vault.Key (Either String a))
+newtype EitherKey s a = EitherKey (Vault.Key s (Either String a))
 
-data ParserPair where
-  ParserPair :: EitherKey a -> ValueParser a -> ParserPair
+data ParserPair s where
+  ParserPair :: EitherKey s a -> ValueParser a -> ParserPair s
 
-data MappingSM a = MappingSM
-  { msmAlts :: !(Alt EitherKey a)
-  , msmParsers :: !(Map Text (NonEmpty ParserPair))
-  , msmVault :: !Vault.Vault
+data MappingSM s a = MappingSM
+  { msmAlts :: !(Alt (EitherKey s) a)
+  , msmParsers :: !(Map Text (NonEmpty (ParserPair s)))
+  , msmVault :: !(Vault.Vault s)
   }
 
-toMappingSM :: ObjectParser a -> IO (MappingSM a)
+toMappingSM :: ObjectParser a -> ST s (MappingSM s a)
 toMappingSM mp = do
   (alts, parsers) <- runStateT (go mp) mempty
   pure MappingSM {msmAlts = alts, msmParsers = parsers, msmVault = Vault.empty}
   where
-    go :: ObjectParser a -> StateT (Map Text (NonEmpty ParserPair)) IO (Alt EitherKey a)
+    go ::
+         ObjectParser a
+      -> StateT (Map Text (NonEmpty (ParserPair s))) (ST s) (Alt (EitherKey s) a)
     go (PureObject a) = pure $ pure a
     go (FMapObject f x) = do
       x' <- go x
@@ -209,13 +214,13 @@ toMappingSM mp = do
       xs' <- mapM go xs
       pure $ foldr (<|>) x' xs'
     go (Field t p) = do
-      key <- liftIO $ EitherKey <$> Vault.newKey
+      key <- lift $ EitherKey <$> Vault.newKey
       let pp = ParserPair key p
       modify' $ M.insertWith (<>) t (pp :| [])
       pure $ Alt [Ap key (pure id)]
 
-finishObjectSM :: MappingSM b -> Either String b
+finishObjectSM :: forall s b. MappingSM s b -> Either String b
 finishObjectSM msm = runAlt go (msmAlts msm)
   where
-    go :: forall a. EitherKey a -> Either String a
+    go :: forall a. EitherKey s a -> Either String a
     go (EitherKey key) = fromMaybe (Left "not found") $ Vault.lookup key (msmVault msm)
