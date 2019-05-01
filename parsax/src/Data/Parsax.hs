@@ -34,6 +34,7 @@ import           Data.Maybe
 import           Data.Reparsec
 import           Data.Reparsec.Sequence
 import           Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import           Data.Text (Text)
 import qualified Data.Vault.ST.Strict as Vault
 
@@ -221,18 +222,17 @@ finishObjectSM msm = runAlt go (msmAlts msm)
 -- weren't consumed, in either success or failure case.
 valueSink ::
      PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a)
-valueSink valueParser = loop mempty
+valueSink valueParser = loop (parseResultT (valueReparsec valueParser))
   where
-    loop acc = do
+    loop parser = do
       mevent <- await
-      let acc' = acc <> maybe mempty pure mevent
-      result <- parseResultT (valueReparsec valueParser) (fmap (const acc') mevent)
+      result <- parser (fmap pure mevent)
       case result of
-        Partial{} -> do
-          loop acc'
-        Failed mremaining errors -> do
-          maybe (pure ()) (mapM_ leftover) mremaining
+        Partial resume -> do
+          loop resume
+        Failed remaining pos _more errors -> do
+          mapM_ leftover (Seq.drop pos remaining)
           pure (Left errors)
-        Done mremaining a -> do
-          maybe (pure ()) (mapM_ leftover) mremaining
+        Done remaining pos _more a -> do
+          mapM_ leftover (Seq.drop pos remaining)
           pure (Right a)

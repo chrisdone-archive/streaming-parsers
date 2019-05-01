@@ -246,7 +246,7 @@ spec = do
          ParserT [Char] ParseError Identity a
       -> [Char]
       -> Result Identity [Char] ParseError a
-    parseOursPartial p i = runIdentity (parseResultT p i)
+    parseOursPartial p i = runIdentity (parseResultT p (Just i))
     parseSeq ::
          ParserT (Seq Char) ParseError Identity a
       -> Seq Char
@@ -256,7 +256,7 @@ spec = do
          ParserT (Seq Char) ParseError Identity a
       -> Seq Char
       -> Result Identity (Seq Char) ParseError a
-    parseSeqPartial p i = runIdentity (parseResultT p i)
+    parseSeqPartial p i = runIdentity (parseResultT p (Just i))
     parsePeacemeal ::
          ParserT (Seq Char) ParseError Identity a
       -> Seq Char
@@ -264,7 +264,7 @@ spec = do
     parsePeacemeal p input =
       runIdentity
         (let loop i = do
-               result <- parseResultT p (Seq.take i input)
+               result <- parseResultT p (Just (Seq.take i input))
                case result of
                  Done !_ !_ !_ r -> pure (Right r)
                  Failed !_ !_ !_ err -> pure (Left err)

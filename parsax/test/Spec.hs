@@ -127,8 +127,8 @@ spec = do
         (let loop i = do
                result <- parseResultT p (Just (Seq.take i input))
                case result of
-                 Done _ r -> pure (Right r)
-                 Failed _ err -> pure (Left err)
+                 Done _ _ _ r -> pure (Right r)
+                 Failed _ _ _ err -> pure (Left err)
                  Partial {} ->
                    if i > length input
                      then pure (Left NoMoreInput)

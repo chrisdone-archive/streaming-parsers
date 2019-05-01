@@ -20,6 +20,7 @@ module Data.Reparsec
 
 import Control.Monad
 import Control.Monad.Trans
+import Data.Maybe
 
 --------------------------------------------------------------------------------
 -- Parser type
@@ -123,11 +124,11 @@ parseOnlyT p i =
 
 -- | Run the parser on the input, allowing a partial result. Use this
 -- for \"streaming\" parsing.
-parseResultT :: Monad m => ParserT i e m a -> i -> m (Result m i e a)
+parseResultT :: (Monad m, Monoid i) => ParserT i e m a -> Maybe i -> m (Result m i e a)
 parseResultT p mi =
   runParserT
     p
-    mi
+    (fromMaybe mempty mi)
     0
     Incomplete
     (\inp pos more v -> pure (Done inp pos more v))
