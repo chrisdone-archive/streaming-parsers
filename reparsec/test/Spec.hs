@@ -38,6 +38,21 @@ main = hspec spec
 spec :: SpecWith ()
 spec = do
   describe
+    "Backtracking on partials"
+    (it
+       "Backtracking across a partial"
+       (shouldBe
+          (case runIdentity
+                  (case runIdentity $
+                        parseResultT
+                          ((expect 'a' *> expect 'a') <>
+                           (expect 'a' *> expect 'b'))
+                          (Just "a") :: Result Identity [Char] ParseError () of
+                     Partial cont -> cont (Just "b")) of
+             Done (Just{}) _ -> True
+             _ -> False)
+          True))
+  describe
     "Empty input"
     (do it "Expected empty" (shouldBe (parseOurs endOfInput []) (Right ()))
         it "Nonexpected empty" (shouldBe (parseOurs digit []) (Left EndOfInput))
@@ -155,7 +170,9 @@ spec = do
         it
           "Not enough input"
           (shouldBe
-             (case parseSeqPartial (Seq.expect 'a' *> Seq.expect 'a') (Seq.fromList "a") of
+             (case parseSeqPartial
+                     (Seq.expect 'a' *> Seq.expect 'a')
+                     (Seq.fromList "a") of
                 Partial {} -> True
                 _ -> False)
              True)
@@ -163,18 +180,22 @@ spec = do
           "zeroOrMore"
           (shouldBe
              (parseSeq (Seq.zeroOrMore (Seq.expect 'b')) (Seq.fromList "bbb"))
-             (Right [(),(),()]))
+             (Right [(), (), ()]))
         it
           "Enough input"
           (shouldBe
-             (case parseSeqPartial (Seq.around 'a' 'c' (Seq.expect 'b')) (Seq.fromList "abc") of
+             (case parseSeqPartial
+                     (Seq.around 'a' 'c' (Seq.expect 'b'))
+                     (Seq.fromList "abc") of
                 Done {} -> True
                 _ -> False)
              True)
         it
           "Fed input"
           (shouldBe
-             (case parseSeqPartial (Seq.expect 'a' *> Seq.expect 'b') (Seq.fromList "a") of
+             (case parseSeqPartial
+                     (Seq.expect 'a' *> Seq.expect 'b')
+                     (Seq.fromList "a") of
                 Done {} -> True
                 Partial continue ->
                   case runIdentity (continue (Just (Seq.fromList "b"))) of
@@ -185,7 +206,9 @@ spec = do
         it
           "Failure"
           (shouldBe
-             (case parseSeqPartial (Seq.expect 'a' *> Seq.expect 'b') (Seq.fromList "a2") of
+             (case parseSeqPartial
+                     (Seq.expect 'a' *> Seq.expect 'b')
+                     (Seq.fromList "a2") of
                 Failed {} -> True
                 _ -> False)
              True))
@@ -202,7 +225,9 @@ spec = do
       -> Result Identity [Char] ParseError a
     parseOursPartial p i = runIdentity (parseResultT p (Just i))
     parseSeq ::
-         ParserT (Seq Char) ParseError Identity a -> Seq Char -> Either ParseError a
+         ParserT (Seq Char) ParseError Identity a
+      -> Seq Char
+      -> Either ParseError a
     parseSeq p i = runIdentity (parseOnlyT p i)
     parseSeqPartial ::
          ParserT (Seq Char) ParseError Identity a
