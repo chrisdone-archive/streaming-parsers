@@ -1,10 +1,11 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 module Main where
 
+import Data.Functor.Identity
+import Data.Reparsec
 import Data.Reparsec.List
 import Data.Reparsec.List.Char
 import Test.Hspec hiding (around)
-import Data.Reparsec
 
 data ParseError
   = EndOfInput
@@ -96,6 +97,31 @@ spec = do
           (shouldBe
              (parseOurs ((letters <> digits) <* endOfInput) "abc!")
              (Left ExpectedEof)))
+  describe
+    "Partial input"
+    (do it
+          "Not enough input"
+          (shouldBe
+             (case parseOursPartial (letter *> letter) "a" of
+                Partial{} -> True
+                _ -> False)
+             True)
+        it
+          "Enough input"
+          (shouldBe
+             (case parseOursPartial (letter *> letter) "ab" of
+                Done{} -> True
+                _ -> False)
+             True)
+        it
+          "Failure"
+          (shouldBe
+             (case parseOursPartial (letter *> letter) "a2" of
+                Failed{} -> True
+                _ -> False)
+             True))
   where
-    parseOurs :: Parser [Char] ParseError a -> [Char] -> Either ParseError a
-    parseOurs = parseOnly
+    parseOurs :: ParserT Identity [Char] ParseError a -> [Char] -> Either ParseError a
+    parseOurs p i = runIdentity (parseOnlyT p i)
+    parseOursPartial :: ParserT Identity [Char] ParseError a -> [Char] -> Result Identity [Char] ParseError a
+    parseOursPartial p i = runIdentity (parseResultT p i)

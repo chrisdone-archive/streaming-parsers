@@ -4,10 +4,11 @@
 -- | Resumable parser with backtracking-by-default.
 
 module Data.Reparsec
-  ( parseOnly
+  ( parseOnlyT
+  , parseResultT
   , failWith
   , UnexpectedToken(..)
-  , Parser(..)
+  , ParserT(..)
   , Result(..)
   -- Error handling
   , NoMoreInput(..)
@@ -21,62 +22,89 @@ import Control.Monad
 
 -- | A parser. Takes as input maybe a value. Nothing terminates the
 -- input. Takes two continuations: one for success and one for failure.
-newtype Parser input error value = Parser
-  { runParser :: forall result.
-                 Maybe input
-              -> (Maybe input -> value -> Result input error result)
-              -> (Maybe input -> error -> Result input error result)
-              -> (Result input error result)
+newtype ParserT m input error value = ParserT
+  { runParserT :: forall result.
+                  Maybe input
+               -> (Maybe input -> value -> m (Result m input error result))
+               -> (Maybe input -> error -> m (Result m input error result))
+               -> m (Result m input error result)
   }
 
--- | Result of a parser. Maybe be partial (expecting more input).
-data Result i e r
-  = Done !(Maybe i) !r
-  | Failed !(Maybe i) !e
-  | Partial (Maybe i -> Result i e r)
-
-instance Monad (Parser i e) where
-  return x = Parser (\mi done _failed -> done mi x)
+instance Monad m => Monad (ParserT m i e) where
+  return x = ParserT (\mi done _failed -> done mi x)
   {-# INLINABLE return #-}
   m >>= f =
-    Parser
+    ParserT
       (\mi done failed ->
-         runParser m mi (\mi' v -> runParser (f v) mi' done failed) failed)
+         runParserT m mi (\mi' v -> runParserT (f v) mi' done failed) failed)
   {-# INLINABLE (>>=) #-}
 
-instance Semigroup e => Semigroup (Parser i e a) where
-  left <> right =
-    Parser
-      (\mi done failed ->
-         runParser
-           left
-           mi
-           done
-           (\_mi e -> runParser right mi done (\mi' e' -> failed mi' (e <> e'))))
-  {-# INLINABLE (<>) #-}
-
-instance Applicative (Parser i e) where
+instance Monad m => Applicative (ParserT m i e) where
   (<*>) = ap
   {-# INLINABLE (<*>) #-}
   pure = return
   {-# INLINABLE pure #-}
 
-instance Functor (Parser i e) where
+instance Monad m => Functor (ParserT m i e) where
   fmap = liftM
   {-# INLINABLE fmap #-}
 
---------------------------------------------------------------------------------
--- API
+-- | Result of a parser. Maybe be partial (expecting more input).
+data Result m i e r
+  = Done !(Maybe i) !r
+  | Failed !(Maybe i) !e
+  | Partial (Maybe i -> m (Result m i e r))
 
-parseOnly :: Parser i e a -> i -> Either e a
-parseOnly p i =
-  terminate (runParser p (Just i) Done Failed)
+instance Semigroup e => Semigroup (ParserT m i e a) where
+  left <> right =
+    ParserT
+      (\mi done failed ->
+         runParserT
+           left
+           mi
+           done
+           (\_mi e -> runParserT right mi done (\mi' e' -> failed mi' (e <> e'))))
+  {-# INLINABLE (<>) #-}
+
+--------------------------------------------------------------------------------
+-- Entry points
+
+-- | Run the parser, terminating the input if it requests more.
+parseOnlyT :: Monad m => ParserT m i e a -> i -> m (Either e a)
+parseOnlyT p i =
+  terminate
+    (runParserT
+       p
+       (Just i)
+       (\inp v -> pure (Done inp v))
+       (\inp e -> pure (Failed inp e)))
   where
-    terminate r =
+    terminate m = do
+      r <- m
       case r of
         Partial f -> terminate (f Nothing)
-        Done _ d -> Right d
-        Failed _ e -> Left e
+        Done _ d -> pure (Right d)
+        Failed _ e -> pure (Left e)
+
+-- | Run the parser on the input, allowing a partial result. Use this
+-- for \"streaming\" parsing.
+parseResultT :: Monad m => ParserT m i e a -> i -> m (Result m i e a)
+parseResultT p i =
+  runParserT
+    p
+    (Just i)
+    (\inp v -> pure (Done inp v))
+    (\inp e -> pure (Failed inp e))
+
+--------------------------------------------------------------------------------
+-- Combinators
+
+-- | Fail the parser with the given error.
+failWith :: e -> ParserT m i e a
+failWith e = ParserT (\mi _done failed -> failed mi e)
+
+--------------------------------------------------------------------------------
+-- Classes
 
 -- | A parser may error that there is no more input.
 class NoMoreInput e where
@@ -89,7 +117,3 @@ class ExpectedEndOfInput e where
 -- | A token in a parse was unexpected.
 class UnexpectedToken t e where
   unexpectedToken :: t -> e
-
--- | Fail the parser with the given error.
-failWith :: e -> Parser i e a
-failWith e = Parser (\mi _done failed -> failed mi e)
