@@ -3,7 +3,7 @@
 
 module Data.Reparsec.Sequence
   ( nextElement
-  , endOfInput
+  -- , endOfInput
   , expect
   , around
   , zeroOrMore
@@ -11,6 +11,7 @@ module Data.Reparsec.Sequence
 
 import Data.Reparsec
 import Data.Sequence (Seq(..))
+import qualified Data.Sequence as Seq
 
 -- | Wrap around something.
 around ::
@@ -32,26 +33,35 @@ expect a = do
 -- | Try to extract the next element from the input.
 nextElement :: (NoMoreInput e, Monad m) => ParserT (Seq a) e m a
 nextElement =
-  ParserT (\mi0 done failed ->
-       let go mi =
-             case mi of
-               Nothing -> failed Nothing noMoreInputError
-               Just (x :<| xs) -> done (Just xs) x
-               Just Empty -> pure (Partial go)
-        in go mi0)
+  ParserT
+    (\mi0 pos more0 done failed ->
+       let go mi more =
+             case Seq.drop pos mi of
+               (x :<| _) -> done mi (pos + 1) more x
+               Empty ->
+                 case more of
+                   Complete -> failed mi pos more noMoreInputError
+                   Incomplete ->
+                     pure
+                       (Partial
+                          (\m ->
+                             case m of
+                               Nothing -> go mempty Complete
+                               Just i -> go (mi <> i) more))
+        in go mi0 more0)
 {-# INLINABLE nextElement #-}
 
--- | Expect the end of input.
-endOfInput :: (ExpectedEndOfInput e, Monad m) => ParserT (Seq a) e m ()
-endOfInput =
-  ParserT (\mi0 done failed ->
-       let go mi =
-             case mi of
-               Just Empty -> pure (Partial go)
-               Just (_ :<| _) -> failed mi expectedEndOfInputError
-               Nothing -> done Nothing ()
-        in go mi0)
-{-# INLINABLE endOfInput #-}
+-- -- | Expect the end of input.
+-- endOfInput :: (ExpectedEndOfInput e, Monad m) => ParserT (Seq a) e m ()
+-- endOfInput =
+--   ParserT (\mi0 done failed ->
+--        let go mi =
+--              case mi of
+--                Just Empty -> pure (Partial go)
+--                Just (_ :<| _) -> failed mi expectedEndOfInputError
+--                Nothing -> done Nothing ()
+--         in go mi0)
+-- {-# INLINABLE endOfInput #-}
 
 -- | Try to extract the next element from the input.
 zeroOrMore :: (Semigroup e, Monad m) => ParserT (Seq a) e m b -> ParserT (Seq a) e m [b]

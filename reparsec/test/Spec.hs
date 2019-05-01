@@ -1,4 +1,7 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedLists #-}
+
 module Main where
 
 import Control.Monad.Trans
@@ -17,7 +20,7 @@ data ParseError
   | NonLetter
   | ExpectedEof
   | Errors [ParseError]
-  | UnexpectedToken Char
+  | UnexpectedToken !Char
   deriving (Eq, Show)
 
 instance NoMoreInput ParseError where noMoreInputError = EndOfInput
@@ -42,20 +45,15 @@ spec = do
     (it
        "Backtracking across a partial"
        (shouldBe
-          (case runIdentity
-                  (case runIdentity $
-                        parseResultT
-                          ((expect 'a' *> expect 'a') <>
-                           (expect 'a' *> expect 'b'))
-                          (Just "a") :: Result Identity [Char] ParseError () of
-                     Partial cont -> cont (Just "b")) of
-             Done (Just{}) _ -> True
-             _ -> False)
-          True))
+          (parsePeacemeal
+             ((Seq.expect 'a' *> Seq.expect 'a') <> (Seq.expect 'a' *> Seq.expect 'b'))
+             ['a','b'])
+          (Right ())))
   describe
     "Empty input"
-    (do it "Expected empty" (shouldBe (parseOurs endOfInput []) (Right ()))
-        it "Nonexpected empty" (shouldBe (parseOurs digit []) (Left EndOfInput))
+        {-it "Expected empty" (shouldBe (parseOurs endOfInput []) (Right ()))-}
+    (do it "Nonexpected empty" (shouldBe (parseOurs digit []) (Left EndOfInput))
+        it "Nonexpected empty after feed" (shouldBe (parseOurs (digit *> digit) ['2']) (Left EndOfInput))
         it
           "Nonexpected empty"
           (shouldBe (parseOurs letter []) (Left EndOfInput)))
@@ -69,14 +67,14 @@ spec = do
               it
                 "123"
                 (shouldBe (parseOurs (letters <> digits) "123") (Right "123")))
-        it
+        {-it
           "With end of input"
           (shouldBe
              (parseOurs ((letters <> digits) <* endOfInput) "abc")
-             (Right "abc"))
-        it
+             (Right "abc"))-}
+        {-it
           "With end of input"
-          (shouldBe (parseOurs (letter <* endOfInput) "a") (Right 'a'))
+          (shouldBe (parseOurs (letter <* endOfInput) "a") (Right 'a'))-}
         it
           "Zero or more"
           (shouldBe (parseOurs (zeroOrMore letter) "a") (Right "a"))
@@ -111,11 +109,12 @@ spec = do
         it
           "Exclamation points"
           (shouldBe (parseOurs letters "!!!") (Left NonLetter))
-        it
+        {-it
           "End of input expected"
           (shouldBe
              (parseOurs ((letters <> digits) <* endOfInput) "abc!")
-             (Left ExpectedEof)))
+             (Left ExpectedEof))-}
+     )
   describe
     "Partial input"
     (do it
@@ -144,6 +143,17 @@ spec = do
                 _ -> False)
              True)
         it
+          "Fed input: finished"
+          (shouldBe
+             (case parseOursPartial (letter *> letter) "a" of
+                Done {} -> True
+                Partial continue ->
+                  case runIdentity (continue Nothing) of
+                    Failed {} -> True
+                    _ -> False
+                _ -> False)
+             True)
+        it
           "Failure"
           (shouldBe
              (case parseOursPartial (letter *> letter) "a2" of
@@ -152,17 +162,17 @@ spec = do
              True))
   describe
     "Sequence"
-    (do it
+        {-it
           "endOfInput"
           (shouldBe
              (parseSeq (Seq.expect 'a' <* Seq.endOfInput) (Seq.fromList "a"))
-             (Right ()))
-        it
+             (Right ()))-}
+        {-it
           "Falsified endOfInput"
           (shouldBe
              (parseSeq (Seq.expect 'a' <* Seq.endOfInput) (Seq.fromList "ab"))
-             (Left expectedEndOfInputError))
-        it
+             (Left expectedEndOfInputError))-}
+    (do it
           "Not more input"
           (shouldBe
              (parseSeq (Seq.expect 'a' *> Seq.expect 'a') (Seq.fromList "a"))
@@ -204,6 +214,19 @@ spec = do
                 _ -> False)
              True)
         it
+          "Fed input: then finished"
+          (shouldBe
+             (case parseSeqPartial
+                     (Seq.expect 'a' *> Seq.expect 'b')
+                     (Seq.fromList "a") of
+                Done {} -> True
+                Partial continue ->
+                  case runIdentity (continue Nothing) of
+                    Failed {} -> True
+                    _ -> False
+                _ -> False)
+             True)
+        it
           "Failure"
           (shouldBe
              (case parseSeqPartial
@@ -223,7 +246,7 @@ spec = do
          ParserT [Char] ParseError Identity a
       -> [Char]
       -> Result Identity [Char] ParseError a
-    parseOursPartial p i = runIdentity (parseResultT p (Just i))
+    parseOursPartial p i = runIdentity (parseResultT p i)
     parseSeq ::
          ParserT (Seq Char) ParseError Identity a
       -> Seq Char
@@ -233,4 +256,20 @@ spec = do
          ParserT (Seq Char) ParseError Identity a
       -> Seq Char
       -> Result Identity (Seq Char) ParseError a
-    parseSeqPartial p i = runIdentity (parseResultT p (Just i))
+    parseSeqPartial p i = runIdentity (parseResultT p i)
+    parsePeacemeal ::
+         ParserT (Seq Char) ParseError Identity a
+      -> Seq Char
+      -> Either ParseError a
+    parsePeacemeal p input =
+      runIdentity
+        (let loop i = do
+               result <- parseResultT p (Seq.take i input)
+               case result of
+                 Done !_ !_ !_ r -> pure (Right r)
+                 Failed !_ !_ !_ err -> pure (Left err)
+                 Partial {} ->
+                   if i > length input
+                     then pure (Left EndOfInput)
+                     else loop (i + 1)
+          in loop 0)

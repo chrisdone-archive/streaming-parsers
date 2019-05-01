@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Rank2Types #-}
 
@@ -13,6 +15,7 @@ module Data.Reparsec
   -- Error handling
   , NoMoreInput(..)
   , ExpectedEndOfInput(..)
+  , More(..)
   ) where
 
 import Control.Monad
@@ -25,27 +28,40 @@ import Control.Monad.Trans
 -- input. Takes two continuations: one for success and one for failure.
 newtype ParserT input error m value = ParserT
   { runParserT :: forall result.
-                  Maybe input
-               -> (Maybe input -> value -> m (Result m input error result))
-               -> (Maybe input -> error -> m (Result m input error result))
+                  input
+               -> Int
+               -> More
+               -> (input -> Int -> More -> value -> m (Result m input error result))
+               -> (input -> Int -> More -> error -> m (Result m input error result))
                -> m (Result m input error result)
   }
 
+-- | Have we read all available input?
+data More
+  = Complete
+  | Incomplete
+
 instance Monad m => Monad (ParserT i e m) where
-  return x = ParserT (\mi done _failed -> done mi x)
+  return x = ParserT (\i pos more done _failed -> done i pos more x)
   {-# INLINABLE return #-}
   m >>= f =
     ParserT
-      (\mi done failed ->
-         runParserT m mi (\mi' v -> runParserT (f v) mi' done failed) failed)
+      (\i pos more done failed ->
+         runParserT
+           m
+           i
+           pos
+           more
+           (\i' !pos' more' v -> runParserT (f v) i' pos' more' done failed)
+           failed)
   {-# INLINABLE (>>=) #-}
 
 instance MonadTrans (ParserT i e) where
   lift m =
     ParserT
-      (\mi done _failed -> do
+      (\i pos more done _failed -> do
          v <- m
-         done mi v)
+         done i pos more v)
 
 instance Monad m => Applicative (ParserT i e m) where
   (<*>) = ap
@@ -59,19 +75,28 @@ instance Monad m => Functor (ParserT i e m) where
 
 -- | Result of a parser. Maybe be partial (expecting more input).
 data Result m i e r
-  = Done !(Maybe i) !r
-  | Failed !(Maybe i) !e
+  = Done !i !Int !More !r
+  | Failed !i !Int !More !e
   | Partial (Maybe i -> m (Result m i e r))
 
 instance Semigroup e => Semigroup (ParserT i e m a) where
   left <> right =
     ParserT
-      (\mi done failed ->
+      (\mi pos more done failed ->
          runParserT
            left
            mi
+           pos
+           more
            done
-           (\_mi e -> runParserT right mi done (\mi' e' -> failed mi' (e <> e'))))
+           (\mi' _pos more' e ->
+              runParserT
+                right
+                mi'
+                pos
+                more'
+                done
+                (\mi'' pos' more'' e' -> failed mi'' pos' more'' (e <> e'))))
   {-# INLINABLE (<>) #-}
 
 --------------------------------------------------------------------------------
@@ -83,33 +108,37 @@ parseOnlyT p i =
   terminate
     (runParserT
        p
-       (Just i)
-       (\inp v -> pure (Done inp v))
-       (\inp e -> pure (Failed inp e)))
+       i
+       0
+       Incomplete
+       (\inp pos more v -> pure (Done inp pos more v))
+       (\inp pos more e -> pure (Failed inp pos more e)))
   where
     terminate m = do
       r <- m
       case r of
         Partial f -> terminate (f Nothing)
-        Done _ d -> pure (Right d)
-        Failed _ e -> pure (Left e)
+        Done _ _pos _more d -> pure (Right d)
+        Failed _ _pos _more e -> pure (Left e)
 
 -- | Run the parser on the input, allowing a partial result. Use this
 -- for \"streaming\" parsing.
-parseResultT :: Monad m => ParserT i e m a -> Maybe i -> m (Result m i e a)
+parseResultT :: Monad m => ParserT i e m a -> i -> m (Result m i e a)
 parseResultT p mi =
   runParserT
     p
     mi
-    (\inp v -> pure (Done inp v))
-    (\inp e -> pure (Failed inp e))
+    0
+    Incomplete
+    (\inp pos more v -> pure (Done inp pos more v))
+    (\inp pos more e -> pure (Failed inp pos more e))
 
 --------------------------------------------------------------------------------
 -- Combinators
 
 -- | Fail the parser with the given error.
 failWith :: e -> ParserT i e m a
-failWith e = ParserT (\mi _done failed -> failed mi e)
+failWith e = ParserT (\mi pos more _done failed -> failed mi pos more e)
 
 --------------------------------------------------------------------------------
 -- Classes
