@@ -160,7 +160,6 @@ stackLikeInputsWithBogusFields =
   , EventObjectKey "y"
   , EventScalar "2"
   , EventObjectEnd
-  , EventScalar "IGNORED"
   ]
 
 stackLikeInputs :: Seq Event
