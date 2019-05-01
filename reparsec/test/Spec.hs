@@ -132,4 +132,4 @@ spec = do
          ParserT [Char] ParseError Identity a
       -> [Char]
       -> Result Identity [Char] ParseError a
-    parseOursPartial p i = runIdentity (parseResultT p i)
+    parseOursPartial p i = runIdentity (parseResultT p (Just i))

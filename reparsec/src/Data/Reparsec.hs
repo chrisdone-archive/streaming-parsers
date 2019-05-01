@@ -96,11 +96,11 @@ parseOnlyT p i =
 
 -- | Run the parser on the input, allowing a partial result. Use this
 -- for \"streaming\" parsing.
-parseResultT :: Monad m => ParserT i e m a -> i -> m (Result m i e a)
-parseResultT p i =
+parseResultT :: Monad m => ParserT i e m a -> Maybe i -> m (Result m i e a)
+parseResultT p mi =
   runParserT
     p
-    (Just i)
+    mi
     (\inp v -> pure (Done inp v))
     (\inp e -> pure (Failed inp e))
 
