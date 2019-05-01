@@ -11,8 +11,7 @@
 -- | Parsing JSON/YAML-style structures from a SAX-style stream.
 
 module Data.Parsax
-  ( objectSink
-  , valueSink
+  ( valueSink
   , valueReparsec
   , Event(..)
   , ObjectParser(..)
@@ -169,17 +168,6 @@ objectReparsec msm textKey = do
       pure (Vault.insert key (Right result))
 
 --------------------------------------------------------------------------------
--- Conduits
-
--- | Run an object parser on an event stream.
-objectSink :: ObjectParser a -> ConduitT Event o m a
-objectSink = undefined
-
--- | Run an value parser on an event stream.
-valueSink :: ValueParser a -> ConduitT Event o m a
-valueSink = undefined
-
---------------------------------------------------------------------------------
 -- MSM
 
 newtype EitherKey s a = EitherKey (Vault.Key s (Either String a))
@@ -224,3 +212,26 @@ finishObjectSM msm = runAlt go (msmAlts msm)
   where
     go :: forall a. EitherKey s a -> Either String a
     go (EitherKey key) = fromMaybe (Left "not found") $ Vault.lookup key (msmVault msm)
+
+--------------------------------------------------------------------------------
+-- Conduits
+
+-- | Run an object parser on an event stream. Leftovers event that
+-- weren't consumed, in either success or failure case.
+valueSink ::
+     PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a)
+valueSink valueParser = loop mempty
+  where
+    loop acc = do
+      mevent <- await
+      let acc' = acc <> maybe [] pure mevent
+      result <- parseResultT (valueReparsec valueParser) (fmap (const acc') mevent)
+      case result of
+        Partial{} -> do
+          loop acc'
+        Failed mremaining errors -> do
+          maybe (pure ()) (mapM_ leftover) mremaining
+          pure (Left errors)
+        Done mremaining a -> do
+          maybe (pure ()) (mapM_ leftover) mremaining
+          pure (Right a)
