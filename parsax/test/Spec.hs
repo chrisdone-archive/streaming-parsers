@@ -160,6 +160,7 @@ stackLikeInputs =
   , EventObjectKey "y"
   , EventScalar "2"
   , EventObjectEnd
+  , EventScalar "IGNORED"
   ]
 
 stackLikeGrammar :: ValueParser (Int, [Either Int Int])

@@ -216,7 +216,7 @@ finishObjectSM msm = runAlt go (msmAlts msm)
 --------------------------------------------------------------------------------
 -- Conduits
 
--- | Run an object parser on an event stream. Leftovers event that
+-- | Run an object parser on an event stream. Leftovers events that
 -- weren't consumed, in either success or failure case.
 valueSink ::
      PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a)
