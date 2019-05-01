@@ -16,6 +16,7 @@ module Data.Reparsec
   ) where
 
 import Control.Monad
+import Control.Monad.Trans
 
 --------------------------------------------------------------------------------
 -- Parser type
@@ -38,6 +39,13 @@ instance Monad m => Monad (ParserT i e m) where
       (\mi done failed ->
          runParserT m mi (\mi' v -> runParserT (f v) mi' done failed) failed)
   {-# INLINABLE (>>=) #-}
+
+instance MonadTrans (ParserT i e) where
+  lift m =
+    ParserT
+      (\mi done _failed -> do
+         v <- m
+         done mi v)
 
 instance Monad m => Applicative (ParserT i e m) where
   (<*>) = ap

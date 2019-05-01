@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 module Main where
 
+import Control.Monad.Trans
 import Data.Functor.Identity
 import Data.Reparsec
 import Data.Reparsec.List
@@ -120,6 +121,9 @@ spec = do
                 Failed {} -> True
                 _ -> False)
              True))
+  describe
+    "Transformer"
+    (it "Lift" (shouldBe (parseOurs (lift (pure ())) "") (Right ())))
   where
     parseOurs ::
          ParserT [Char] ParseError Identity a -> [Char] -> Either ParseError a
