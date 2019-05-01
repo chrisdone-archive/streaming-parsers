@@ -6,6 +6,9 @@ import Data.Functor.Identity
 import Data.Reparsec
 import Data.Reparsec.List
 import Data.Reparsec.List.Char
+import qualified Data.Reparsec.Sequence as Seq
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import Test.Hspec hiding (around)
 
 data ParseError
@@ -133,6 +136,60 @@ spec = do
                 _ -> False)
              True))
   describe
+    "Sequence"
+    (do it
+          "endOfInput"
+          (shouldBe
+             (parseSeq (Seq.expect 'a' <* Seq.endOfInput) (Seq.fromList "a"))
+             (Right ()))
+        it
+          "Falsified endOfInput"
+          (shouldBe
+             (parseSeq (Seq.expect 'a' <* Seq.endOfInput) (Seq.fromList "ab"))
+             (Left expectedEndOfInputError))
+        it
+          "Not more input"
+          (shouldBe
+             (parseSeq (Seq.expect 'a' *> Seq.expect 'a') (Seq.fromList "a"))
+             (Left noMoreInputError))
+        it
+          "Not enough input"
+          (shouldBe
+             (case parseSeqPartial (Seq.expect 'a' *> Seq.expect 'a') (Seq.fromList "a") of
+                Partial {} -> True
+                _ -> False)
+             True)
+        it
+          "zeroOrMore"
+          (shouldBe
+             (parseSeq (Seq.zeroOrMore (Seq.expect 'b')) (Seq.fromList "bbb"))
+             (Right [(),(),()]))
+        it
+          "Enough input"
+          (shouldBe
+             (case parseSeqPartial (Seq.around 'a' 'c' (Seq.expect 'b')) (Seq.fromList "abc") of
+                Done {} -> True
+                _ -> False)
+             True)
+        it
+          "Fed input"
+          (shouldBe
+             (case parseSeqPartial (Seq.expect 'a' *> Seq.expect 'b') (Seq.fromList "a") of
+                Done {} -> True
+                Partial continue ->
+                  case runIdentity (continue (Just (Seq.fromList "b"))) of
+                    Done {} -> True
+                    _ -> False
+                _ -> False)
+             True)
+        it
+          "Failure"
+          (shouldBe
+             (case parseSeqPartial (Seq.expect 'a' *> Seq.expect 'b') (Seq.fromList "a2") of
+                Failed {} -> True
+                _ -> False)
+             True))
+  describe
     "Transformer"
     (it "Lift" (shouldBe (parseOurs (lift (pure ())) "") (Right ())))
   where
@@ -144,3 +201,11 @@ spec = do
       -> [Char]
       -> Result Identity [Char] ParseError a
     parseOursPartial p i = runIdentity (parseResultT p (Just i))
+    parseSeq ::
+         ParserT (Seq Char) ParseError Identity a -> Seq Char -> Either ParseError a
+    parseSeq p i = runIdentity (parseOnlyT p i)
+    parseSeqPartial ::
+         ParserT (Seq Char) ParseError Identity a
+      -> Seq Char
+      -> Result Identity (Seq Char) ParseError a
+    parseSeqPartial p i = runIdentity (parseResultT p (Just i))

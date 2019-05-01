@@ -17,7 +17,8 @@ library
     Data.Reparsec
     Data.Reparsec.List
     Data.Reparsec.List.Char
-  build-depends:       base >= 4.7 && < 5, mtl
+    Data.Reparsec.Sequence
+  build-depends:       base >= 4.7 && < 5, mtl, containers
   default-language:    Haskell2010
 
 test-suite reparsec-test
@@ -28,5 +29,6 @@ test-suite reparsec-test
                      , reparsec
                      , hspec
                      , mtl
+                     , containers
   ghc-options:         -Wall -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
