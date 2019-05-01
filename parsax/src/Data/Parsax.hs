@@ -41,8 +41,6 @@ import qualified Data.Vault.ST.Strict as Vault
 --------------------------------------------------------------------------------
 -- Types
 
-newtype Key = Key Text deriving (Eq, Ord, Show)
-
 data ParseError
   = UserParseError !Text
   | NoMoreInput
