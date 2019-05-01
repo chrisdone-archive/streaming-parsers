@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 import           Control.Monad.ST
@@ -6,9 +7,11 @@ import           Data.Bifunctor
 import qualified Data.ByteString.Char8 as S8
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
-import           Data.Maybe
+import           Data.Foldable
 import           Data.Parsax
 import           Data.Reparsec
+import           Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import           Test.Hspec
 import           Text.Read
@@ -111,18 +114,18 @@ spec = do
           (shouldBe
              (runST
                 (runConduit
-                   (CL.sourceList stackLikeInputs .|
+                   (CL.sourceList (toList stackLikeInputs) .|
                     valueSink stackLikeGrammar)))
              stackLikeResult)))
   where
     parsePeacemeal ::
-         (forall s. ParserT [Event] ParseError (ST s) a)
-      -> [Event]
+         (forall s. ParserT (Seq Event) ParseError (ST s) a)
+      -> Seq Event
       -> Either ParseError a
     parsePeacemeal p input =
       runST
         (let loop i = do
-               result <- parseResultT p (Just (take i input))
+               result <- parseResultT p (Just (Seq.take i input))
                case result of
                  Done _ r -> pure (Right r)
                  Failed _ err -> pure (Left err)
@@ -132,8 +135,8 @@ spec = do
                      else loop (i + 1)
           in loop 0)
     parseOnly ::
-         (forall s. ParserT [Event] ParseError (ST s) a)
-      -> [Event]
+         (forall s. ParserT (Seq Event) ParseError (ST s) a)
+      -> Seq Event
       -> Either ParseError a
     parseOnly p i = runST (parseOnlyT p i)
 
@@ -143,7 +146,7 @@ spec = do
 stackLikeResult :: Either a (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
 
-stackLikeInputs :: [Event]
+stackLikeInputs :: Seq Event
 stackLikeInputs =
   [ EventObjectStart
   , EventObjectKey "x"

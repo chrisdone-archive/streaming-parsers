@@ -32,7 +32,8 @@ import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 import           Data.Reparsec
-import           Data.Reparsec.List
+import           Data.Reparsec.Sequence
+import           Data.Sequence (Seq)
 import           Data.Text (Text)
 import qualified Data.Vault.ST.Strict as Vault
 
@@ -114,7 +115,7 @@ instance Semigroup (ValueParser a) where
 -- Reparsecs
 
 -- | Make a reparsec out of a value parser.
-valueReparsec :: PrimMonad m => ValueParser a -> ParserT [Event] ParseError m a
+valueReparsec :: PrimMonad m => ValueParser a -> ParserT (Seq Event) ParseError m a
 valueReparsec =
   \case
     PureValue a -> pure a
@@ -150,7 +151,7 @@ valueReparsec =
         els -> failWith (ExpectedScalarButGot els)
 
 -- | Make a reparsec out of an object parser.
-objectReparsec :: PrimMonad m => MappingSM s a -> Text -> ParserT [Event] ParseError m (MappingSM s a)
+objectReparsec :: PrimMonad m => MappingSM s a -> Text -> ParserT (Seq Event) ParseError m (MappingSM s a)
 objectReparsec msm textKey = do
   case M.lookup textKey (msmParsers msm) of
     Nothing ->
@@ -224,7 +225,7 @@ valueSink valueParser = loop mempty
   where
     loop acc = do
       mevent <- await
-      let acc' = acc <> maybe [] pure mevent
+      let acc' = acc <> maybe mempty pure mevent
       result <- parseResultT (valueReparsec valueParser) (fmap (const acc') mevent)
       case result of
         Partial{} -> do
