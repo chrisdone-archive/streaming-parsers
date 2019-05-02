@@ -24,7 +24,8 @@ library
                        free,
                        transformers,
                        primitive,
-                       mtl
+                       mtl,
+                       semigroupoids
   default-language:    Haskell2010
 
 test-suite parsax-test

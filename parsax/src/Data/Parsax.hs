@@ -37,6 +37,7 @@ import qualified Data.Map.Strict as M
 import           Data.Maybe
 import           Data.Reparsec
 import           Data.Reparsec.Sequence
+import           Data.Semigroup.Foldable
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import           Data.Text (Text)
@@ -122,7 +123,7 @@ valueReparsec :: PrimMonad m => ValueParser a -> ParserT (Seq Event) ParseError 
 valueReparsec =
   \case
     PureValue a -> pure a
-    AltValue (x :| xs) -> foldr (<>) (valueReparsec x) (map valueReparsec xs)
+    AltValue xs -> foldMap1 valueReparsec xs
     FMapValue f valueParser -> fmap f (valueReparsec valueParser)
     Object objectParser -> do
       expect EventObjectStart
@@ -159,8 +160,8 @@ objectReparsec msm textKey = do
   case M.lookup textKey (msmParsers msm) of
     Nothing ->
       pure msm
-    Just (x :| xs) -> do
-      updateVault <- foldr (<>) (makeAttempt x) (map makeAttempt xs)
+    Just xs -> do
+      updateVault <- foldMap1 makeAttempt xs
       pure
         msm
           { msmParsers = M.delete textKey (msmParsers msm)
@@ -201,10 +202,9 @@ toMappingSM mp = do
       a' <- go a
       b' <- go b
       pure $ liftA2 f a' b'
-    go (AltObject (x :| xs)) = do
-      x' <- go x
+    go (AltObject xs) = do
       xs' <- mapM go xs
-      pure $ foldr (<|>) x' xs'
+      pure $ asum1 xs'
     go (Field t p) = do
       key <- lift $ EitherKey <$> Vault.newKey
       let pp = ParserPair key p
