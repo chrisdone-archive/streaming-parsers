@@ -14,6 +14,7 @@ library
   hs-source-dirs:      src
   ghc-options:         -Wall
   exposed-modules:     Data.Parsax
+                       Data.Parsax.Yaml
   build-depends:       base >= 4.7 && < 5,
                        conduit,
                        reparsec,
@@ -25,7 +26,10 @@ library
                        transformers,
                        primitive,
                        mtl,
-                       semigroupoids
+                       semigroupoids,
+                       aeson,
+                       libyaml,
+                       resourcet
   default-language:    Haskell2010
 
 test-suite parsax-test

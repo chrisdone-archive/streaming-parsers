@@ -35,6 +35,8 @@ resolver: lts-12.12
 packages:
 - reparsec
 - parsax
+extra-deps:
+- libyaml-0.1.1.0@sha256:b3fcd8c44622c75e054c2267f3fec39a58a311748000310cbc8257a4683d3f02
 # Dependency packages to be pulled from upstream that are not in the resolver
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
