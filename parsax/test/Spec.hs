@@ -4,11 +4,13 @@
 
 import           Control.Monad.ST
 import           Data.Bifunctor
+import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.Foldable
 import           Data.Parsax
+import           Data.Parsax.Yaml
 import           Data.Reparsec
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
@@ -117,6 +119,19 @@ spec = do
                    (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
                     valueSink stackLikeGrammar)))
              stackLikeResult)))
+  describe
+    "Yaml"
+    (do it
+          "From file"
+          (shouldReturn
+             (parseYamlFile stackLikeGrammar "test/assets/stack.yaml")
+             stackLikeResult)
+        it
+          "From string"
+          (shouldReturn
+             (do bytes <- S.readFile "test/assets/stack.yaml"
+                 parseYamlByteString stackLikeGrammar bytes)
+             stackLikeResult))
   where
     parsePeacemeal ::
          (forall s. ParserT (Seq Event) ParseError (ST s) a)
@@ -143,7 +158,7 @@ spec = do
 --------------------------------------------------------------------------------
 -- stack.yaml-like test data
 
-stackLikeResult :: Either a (Int, [Either Int Int])
+stackLikeResult :: Either ParseError (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
 
 stackLikeInputsWithBogusFields :: Seq Event
