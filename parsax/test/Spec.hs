@@ -180,7 +180,15 @@ stackLikeResult :: Either ParseError (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
 
 stackLikeResultVars :: Either ParseError (Int, [Either Int Int])
-stackLikeResultVars = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int), Right (666 :: Int)]))
+stackLikeResultVars =
+  (Right
+     ( 2 :: Int
+     , [ Left (1 :: Int)
+       , Right (666 :: Int)
+       , Right (666 :: Int)
+       , Right 777
+       , Right 888
+       ]))
 
 stackLikeInputsWithBogusFields :: Seq Event
 stackLikeInputsWithBogusFields =

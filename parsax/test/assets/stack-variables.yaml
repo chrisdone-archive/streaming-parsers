@@ -3,4 +3,6 @@ x:
 - &var
   location: 666
 - *var
+- &key location: 777
+- *key: 888
 y: 2

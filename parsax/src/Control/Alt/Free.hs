@@ -24,7 +24,6 @@ module Control.Alt.Free
 
 import           Data.Functor.Alt ((<!>))
 import qualified Data.Functor.Alt as Alt
-import           Data.Functor.Apply
 import           Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 
@@ -43,16 +42,8 @@ instance Functor (AltF f) where
 instance Functor (Alt f) where
   fmap f (Alt xs) = Alt $ fmap (fmap f) xs
 
-instance Applicative (AltF f) where
-  pure = Pure
-  {-# INLINE pure #-}
-  (Pure f)   <*> y         = fmap f y      -- fmap
-  y          <*> (Pure a)  = fmap ($ a) y  -- interchange
-  (Ap a f)   <*> b         = a `Ap` (flip <$> f <*> (Alt (pure b)))
-  {-# INLINE (<*>) #-}
-
 instance Applicative (Alt f) where
-  pure a = Alt (pure (pure a))
+  pure a = Alt (pure (Pure a))
   {-# INLINE pure #-}
 
   (Alt xs) <*> ys = Alt (xs >>= alternatives . (`ap'` ys))
@@ -62,6 +53,10 @@ instance Applicative (Alt f) where
       Pure f `ap'` u      = fmap f u
       (u `Ap` f) `ap'` v  = Alt (pure (u `Ap` (flip <$> f) <*> v))
   {-# INLINE (<*>) #-}
+
+instance Alt.Alt (Alt f) where
+  Alt as <!> Alt bs = Alt (as <> bs)
+  {-# INLINE (<!>) #-}
 
 -- | Given a natural transformation from @f@ to @g@, this gives a canonical monoidal natural transformation from @'Alt' f@ to @g@.
 runAlt :: forall f g a. (Alt.Alt g, Applicative g) => (forall x. f x -> g x) -> Alt f a -> g a
@@ -74,15 +69,3 @@ runAlt u xs0 = go xs0 where
   go2 (Pure a) = pure a
   go2 (Ap x f) = flip id <$> u x <*> go f
 {-# INLINABLE runAlt #-}
-
-instance Apply (Alt f) where
-  (<.>) = (<*>)
-  {-# INLINE (<.>) #-}
-
-instance Alt.Alt (Alt f) where
-  Alt as <!> Alt bs = Alt (as <> bs)
-  {-# INLINE (<!>) #-}
-
-instance Semigroup (Alt f a) where
-  (<>) = (<!>)
-  {-# INLINE (<>) #-}
