@@ -238,7 +238,9 @@ finishObjectSM msm = Free.runAlt go (msmAlts msm)
 -- | Run an object parser on an event stream. Leftovers events that
 -- weren't consumed, in either success or failure case.
 valueSink ::
-     PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a, Seq ParseWarning)
+     PrimMonad m
+  => ValueParser a
+  -> ConduitT Event o m (Either ParseError a, Seq ParseWarning)
 valueSink valueParser = do
   mfirst <- await
   case mfirst of
