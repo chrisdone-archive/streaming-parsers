@@ -112,14 +112,22 @@ spec = do
     "Conduit"
     (describe
        "Object"
-       (it
-          "Object with bogus fields"
-          (shouldBe
-             (runST
-                (runConduit
-                   (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
-                    valueSink stackLikeGrammar)))
-             stackLikeResult)))
+       (do it
+             "Object with bogus fields"
+             (shouldBe
+                (runST
+                   (runConduit
+                      (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
+                       valueSink stackLikeGrammar)))
+                stackLikeResult)
+           it
+             "Empty object"
+             (shouldBe
+                (runST
+                   (runConduit
+                      (CL.sourceList [EventObjectStart,EventObjectEnd] .|
+                       valueSink (Object (pure ())))))
+                (Right ()))))
   describe
     "Yaml"
     (do it

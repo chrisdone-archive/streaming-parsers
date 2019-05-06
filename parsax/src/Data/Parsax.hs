@@ -283,7 +283,7 @@ data SchemaError
 data Schema =
   Schema
     { schemaScalar :: Bool
-    , schemaObject :: Map Text Schema
+    , schemaObject :: Maybe (Map Text Schema)
     , schemaArray :: Maybe Schema
     }
 
@@ -294,7 +294,11 @@ instance Monoid Schema where
   mappend s1 s2 =
     Schema
       { schemaScalar = schemaScalar s1 || schemaScalar s2
-      , schemaObject = M.unionWith mappend (schemaObject s1) (schemaObject s2)
+      , schemaObject = case (schemaObject s1,schemaObject s2) of
+                         (Just o1,Just o2) -> Just (M.unionWith mappend o1 o2)
+                         (Just o, Nothing) -> Just o
+                         (Nothing, Just o) -> Just o
+                         (Nothing, Nothing) -> Nothing
       , schemaArray = mappend (schemaArray s1) (schemaArray s2)
       }
   mempty =
@@ -305,7 +309,7 @@ valueParserSchema :: ValueParser a -> Schema
 valueParserSchema =
   \case
     Scalar {} -> mempty {schemaScalar = True}
-    Object objectParser -> mempty {schemaObject = objectParserSchema objectParser}
+    Object objectParser -> mempty {schemaObject = Just (objectParserSchema objectParser)}
     Array valueParser -> mempty { schemaArray = Just (valueParserSchema valueParser)}
     FMapValue _ v -> valueParserSchema v
     PureValue {} -> mempty
@@ -339,25 +343,25 @@ enforceSchema mschema = do
         _ -> pure SchemaOK
     Just ev@EventObjectStart {} ->
       case fmap schemaObject mschema of
-        Just obj
-          | not (M.null obj) -> do
-            yield ev
-            let loop = do
-                  mnext1 <- await
-                  case mnext1 of
-                    Just e@EventObjectEnd -> do
-                      yield e
-                      pure SchemaOK
-                    Just e@(EventObjectKey key) -> do
-                      yield e
-                      result <- enforceSchema (M.lookup key obj)
-                      case result of
-                        SchemaOK -> loop
-                        SchemaError err -> pure (SchemaError err)
-                    Just e ->
-                      pure (SchemaError (SchemaWrongEventInObjectContext e))
-                    Nothing -> pure (SchemaError SchemaUnterminatedObject)
-             in loop
+        Just (Just obj) -> do
+          yield ev
+          let loop = do
+                mnext1 <- await
+                case mnext1 of
+                  Just e@EventObjectEnd -> do
+                    yield e
+                    pure SchemaOK
+                  Just e@(EventObjectKey key) -> do
+                    yield e
+                    result <- enforceSchema (M.lookup key obj)
+                    case result of
+                      SchemaOK -> loop
+                      SchemaError err -> pure (SchemaError err)
+                  Just e ->
+                    pure (SchemaError (SchemaWrongEventInObjectContext e))
+                  Nothing -> pure (SchemaError SchemaUnterminatedObject)
+           in loop
+        Just Nothing -> pure (SchemaError SchemaObjectNotAllowed)
         Nothing ->
           let loop = do
                 mnext1 <- await
@@ -368,7 +372,6 @@ enforceSchema mschema = do
                     pure (SchemaError (SchemaWrongEventInObjectContext e))
                   Nothing -> pure (SchemaError SchemaUnterminatedObject)
            in loop
-        _ -> pure (SchemaError SchemaObjectNotAllowed)
     Just ev@EventArrayStart ->
       case fmap schemaArray mschema of
         Just Nothing -> pure (SchemaError SchemaArrayNotAllowed)
