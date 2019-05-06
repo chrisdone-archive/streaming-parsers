@@ -248,15 +248,14 @@ valueSink valueParser = do
     Nothing -> pure (Left EmptyDocument, mempty)
   where
     start = do
-      (menforceResult, parseResult) <-
-        fuseBothMaybe
+      (enforceResult, parseResult) <-
+        fuseBoth
           (enforceSchema (Just (valueParserSchema valueParser)))
           (loop (parseResultT (valueReparsec valueParser)))
       pure
-        (case menforceResult of
-           Just (SchemaOK, warnings) -> second (<> warnings) parseResult
-           Just (SchemaError err, warnings) -> (Left (BadSchema err), warnings)
-           Nothing -> parseResult)
+        (case enforceResult of
+           (SchemaOK, warnings) -> second (<> warnings) parseResult
+           (SchemaError err, warnings) -> (Left (BadSchema err), warnings))
     loop parser = do
       mevent <- await
       result <- parser (fmap pure mevent)

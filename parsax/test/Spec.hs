@@ -119,7 +119,7 @@ spec = do
                    (runConduit
                       (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
                        valueSink stackLikeGrammar)))
-                (stackLikeResult, mempty))
+                (stackLikeResult, pure (IgnoredKey "wibble")))
            it
              "Empty object"
              (shouldBe
