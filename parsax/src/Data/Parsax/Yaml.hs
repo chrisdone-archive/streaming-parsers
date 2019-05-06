@@ -182,4 +182,5 @@ record src = src .| recording
             Nothing -> pure (toList acc)
             Just i -> do
               yield i
-              go (acc :|> i)
+              let !consed = acc :|> i
+              go consed
