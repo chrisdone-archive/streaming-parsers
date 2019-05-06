@@ -164,6 +164,10 @@ bind Nothing src = src
 bind (Just var) src = do
   events <- record src
   ref <- lift ask
+  mp <- liftIO (readIORef ref)
+  case M.lookup var mp of
+    Nothing -> pure ()
+    Just {} -> error "Warn about duplicate keys here."
   liftIO (modifyIORef ref (M.insert var events))
 
 --------------------------------------------------------------------------------
