@@ -258,6 +258,7 @@ valueSink valueParser = do
 --------------------------------------------------------------------------------
 -- Schema enforcing
 
+-- | A schema of the shape of data that can be input.
 data Schema =
   Schema
     { schemaScalar :: Bool
@@ -303,6 +304,7 @@ objectParserSchema = go
         PureObject {} -> mempty
         AltObject choices -> foldMap go choices
 
+-- | Enforce that the input events match the schema expected.
 enforceSchema :: Monad m => Maybe Schema -> ConduitT Event Event m ()
 enforceSchema mschema = do
   mnext <- await
