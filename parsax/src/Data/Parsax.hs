@@ -136,7 +136,7 @@ valueReparsec =
                 loop msm'
               EventObjectEnd -> pure (finishObjectSM msm)
               ev -> failWith (ExpectedObjectKeyOrEndOfObject ev)
-      !mappingSM <- lift (stToPrim(toMappingSM objectParser))
+      !mappingSM <- lift (stToPrim (toMappingSM objectParser))
       result <- loop mappingSM
       case result of
         Left stringError -> failWith (AltError stringError)
@@ -209,7 +209,7 @@ toMappingSM mp = do
     go (Field t p) = do
       key <- lift $ EitherKey <$> Vault.newKey
       let pp = ParserPair key p
-      modify' $ M.insertWith (<>) t (pp :| [])
+      modify' $ M.insertWith (flip (<>)) t (pp :| [])
       pure $ Alt [Ap key (pure id)]
 
 finishObjectSM :: forall s b. MappingSM s b -> Either String b
