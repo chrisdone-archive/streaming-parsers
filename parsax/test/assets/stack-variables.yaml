@@ -1,0 +1,6 @@
+x:
+- 1
+- &var
+  location: 666
+- *var
+y: 2
