@@ -10,6 +10,7 @@ module Data.Parsax.Yaml
   , parseYamlFile
   , yamlEventSource
   , yamlEventFileSource
+  , eventConduit
   ) where
 
 import           Control.Monad.IO.Class
@@ -50,59 +51,107 @@ eventConduit :: MonadIO m => ConduitT Libyaml.MarkedEvent Event m ()
 eventConduit = do
   ref <- liftIO (newIORef mempty)
   transPipe (\m -> runReaderT m ref) value
+
+--------------------------------------------------------------------------------
+-- YAML conduits
+
+-- | A YAML value.
+value ::
+     MonadIO m
+  => ConduitT Libyaml.MarkedEvent Event (ReaderT (IORef (Map Libyaml.AnchorName [Event])) m) ()
+value = do
+  mevent <- await
+  case mevent of
+    Nothing -> pure ()
+    Just Libyaml.MarkedEvent {yamlEvent = event} ->
+      case event of
+        Libyaml.EventStreamStart -> value
+        Libyaml.EventStreamEnd -> pure ()
+        Libyaml.EventDocumentStart -> value
+        Libyaml.EventDocumentEnd -> pure ()
+        Libyaml.EventAlias anchorName -> do
+          result <- lookupAnchor anchorName
+          case result of
+            Nothing -> error ("No such anchor " ++ show anchorName)
+            Just events -> mapM_ yield events
+        Libyaml.EventScalar !bs !_tag !_style !manchor ->
+          bind manchor (yield (EventScalar bs))
+        Libyaml.EventSequenceStart !_tag !_sequencestyle !manchor ->
+          bind manchor array
+        Libyaml.EventMappingStart !_tag !_mappingstyle !manchor ->
+          bind manchor object
+        Libyaml.EventSequenceEnd -> error "Unexpected mapping end."
+        Libyaml.EventMappingEnd -> error "Unexpected mapping end."
+
+-- | A YAML array.
+array ::
+     MonadIO m
+  => ConduitT Libyaml.MarkedEvent Event (ReaderT (IORef (Map Libyaml.AnchorName [Event])) m) ()
+array = do
+  yield EventArrayStart
+  go
   where
-    value = do
-      mevent <- await
-      case mevent of
-        Nothing -> pure ()
-        Just Libyaml.MarkedEvent {yamlEvent = event} ->
-          case event of
-            Libyaml.EventStreamStart -> value
-            Libyaml.EventStreamEnd -> pure ()
-            Libyaml.EventDocumentStart -> value
-            Libyaml.EventDocumentEnd -> pure ()
-            Libyaml.EventAlias {} -> value
-            Libyaml.EventScalar !bs !_tag !_style !manchor ->
-              bind manchor (yield (EventScalar bs))
-            Libyaml.EventSequenceStart !_tag !_sequencestyle !manchor ->
-              bind
-                manchor
-                (do let go = do
-                          mev <- await
-                          case mev of
-                            Nothing -> error "Expected end of sequence."
-                            Just marked@Libyaml.MarkedEvent {yamlEvent = ev} ->
-                              case ev of
-                                Libyaml.EventSequenceEnd -> do
-                                  yield EventArrayEnd
-                                _ -> do
-                                  leftover marked
-                                  value
-                                  go
-                    yield EventArrayStart
-                    go)
-            Libyaml.EventMappingStart !_tag !_mappingstyle !manchor ->
-              bind
-                manchor
-                (do let go = do
-                          mev <- await
-                          case mev of
-                            Nothing -> error "Expected end of mapping."
-                            Just Libyaml.MarkedEvent {yamlEvent = ev} ->
-                              case ev of
-                                Libyaml.EventMappingEnd -> do
-                                  yield EventObjectEnd
-                                Libyaml.EventScalar !bs !_tag !_style !mkeyanchor -> do
-                                  bind
-                                    mkeyanchor
-                                    (yield (EventObjectKey (T.decodeUtf8 bs)))
-                                  value
-                                  go
-                                _ -> error "Expected key or end of object."
-                    yield EventObjectStart
-                    go)
-            Libyaml.EventSequenceEnd -> error "Unexpected mapping end."
-            Libyaml.EventMappingEnd -> error "Unexpected mapping end."
+    go = do
+      mev <- await
+      case mev of
+        Nothing -> error "Expected end of sequence."
+        Just marked@Libyaml.MarkedEvent {yamlEvent = ev} ->
+          case ev of
+            Libyaml.EventSequenceEnd -> do
+              yield EventArrayEnd
+            _ -> do
+              leftover marked
+              value
+              go
+
+-- | A YAML object.
+object ::
+     MonadIO m
+  => ConduitT Libyaml.MarkedEvent Event (ReaderT (IORef (Map Libyaml.AnchorName [Event])) m) ()
+object = do
+  yield EventObjectStart
+  go
+  where
+    go = do
+      mev <- await
+      case mev of
+        Nothing -> error "Expected end of mapping."
+        Just Libyaml.MarkedEvent {yamlEvent = ev} ->
+          case ev of
+            Libyaml.EventMappingEnd -> do
+              yield EventObjectEnd
+            Libyaml.EventAlias anchorName -> do
+              result <- lookupAnchor anchorName
+              case result of
+                Nothing -> error "Anchor name not in scope!"
+                Just events ->
+                  case events of
+                    [eventObjectKey@EventObjectKey {}] -> do
+                      yield eventObjectKey
+                      value
+                      go
+                    _ ->
+                      error
+                        "Alias yielded wrong event for this position: expected key or end-of-object."
+            Libyaml.EventScalar !bs !_tag !_style !mkeyanchor -> do
+              bind mkeyanchor (yield (EventObjectKey (T.decodeUtf8 bs)))
+              value
+              go
+            _ -> error "Expected key or end of object."
+
+--------------------------------------------------------------------------------
+-- Anchor utilities
+
+-- | If there's a variable to lookupAnchor, lookupAnchor all the events to that variable.
+lookupAnchor ::
+     (MonadIO m
+     ,f ~ ReaderT (IORef (Map Libyaml.AnchorName [o])) m)
+  => Libyaml.AnchorName
+  -> ConduitT i o f (Maybe [o])
+lookupAnchor var = do
+  ref <- lift ask
+  mp <- liftIO (readIORef ref)
+  pure (M.lookup var mp)
 
 -- | If there's a variable to bind, bind all the events to that variable.
 bind ::
@@ -116,6 +165,9 @@ bind (Just var) src = do
   events <- record src
   ref <- lift ask
   liftIO (modifyIORef ref (M.insert var events))
+
+--------------------------------------------------------------------------------
+-- Conduit utilities
 
 -- | Record the output of a conduit and also yield its outputs
 -- downstream.
