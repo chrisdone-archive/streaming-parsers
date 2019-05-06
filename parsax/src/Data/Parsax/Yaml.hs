@@ -29,12 +29,12 @@ import qualified Data.Text.Encoding as T
 import qualified Text.Libyaml as Libyaml
 
 -- | Parse from a file.
-parseYamlFile :: ValueParser a -> FilePath -> IO (Either ParseError a)
+parseYamlFile :: ValueParser a -> FilePath -> IO (Either ParseError a, Seq ParseWarning)
 parseYamlFile valueParser file =
   runConduitRes (yamlEventFileSource file .| valueSink valueParser)
 
 -- | Parse from a bytestring.
-parseYamlByteString :: ValueParser a -> ByteString -> IO (Either ParseError a)
+parseYamlByteString :: ValueParser a -> ByteString -> IO (Either ParseError a, Seq ParseWarning)
 parseYamlByteString valueParser byteString =
   runConduitRes (yamlEventSource byteString .| valueSink valueParser)
 

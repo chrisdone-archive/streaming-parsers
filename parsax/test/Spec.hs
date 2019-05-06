@@ -32,7 +32,7 @@ spec = do
              (runST
                 (runConduit
                    (CL.sourceList [] .| valueSink (Object (PureObject ())))))
-             (Left EmptyDocument)))
+             (Left EmptyDocument, mempty)))
   describe
     "Reparsec"
     (do describe
@@ -119,45 +119,49 @@ spec = do
                    (runConduit
                       (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
                        valueSink stackLikeGrammar)))
-                stackLikeResult)
+                (stackLikeResult, mempty))
            it
              "Empty object"
              (shouldBe
                 (runST
                    (runConduit
-                      (CL.sourceList [EventObjectStart,EventObjectEnd] .|
+                      (CL.sourceList [EventObjectStart, EventObjectEnd] .|
                        valueSink (Object (pure ())))))
-                (Right ()))))
+                (Right (), mempty))))
   describe
     "Yaml"
     (do it
           "From file"
           (shouldReturn
              (parseYamlFile stackLikeGrammar "test/assets/stack.yaml")
-             stackLikeResult)
+             (stackLikeResult, mempty))
         it
           "From string"
           (shouldReturn
              (do bytes <- S.readFile "test/assets/stack.yaml"
                  parseYamlByteString stackLikeGrammar bytes)
-             stackLikeResult)
+             (stackLikeResult, mempty))
         it
           "Empty"
           (shouldReturn
              (parseYamlByteString (Array (Scalar pure)) "")
-             (Left EmptyDocument))
+             (Left EmptyDocument, mempty))
         describe
           "Variables"
           (do it
                 "Simple"
                 (shouldReturn
                    (parseYamlFile variablesGrammar "test/assets/variables.yaml")
-                   (Right ["Apple","Beachball","Cartoon","Duckface","Apple"]))
+                   ( Right
+                       ["Apple", "Beachball", "Cartoon", "Duckface", "Apple"]
+                   , mempty))
               it
                 "Object sized"
                 (shouldReturn
-                   (parseYamlFile stackLikeGrammar "test/assets/stack-variables.yaml")
-                   stackLikeResultVars)))
+                   (parseYamlFile
+                      stackLikeGrammar
+                      "test/assets/stack-variables.yaml")
+                   (stackLikeResultVars, mempty))))
   where
     parsePeacemeal ::
          (forall s. ParserT (Seq Event) ParseError (ST s) a)

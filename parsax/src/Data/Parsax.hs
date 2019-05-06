@@ -1,3 +1,5 @@
+{-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -18,18 +20,20 @@ module Data.Parsax
   , Schema(..)
   , Event(..)
   , ObjectParser(..)
-  , ValueParser (..)
-  , ParseError (..)
+  , ValueParser(..)
+  , ParseError(..)
+  , ParseWarning(..)
   ) where
 
 import qualified Control.Alt.Free as Free
 import           Control.Applicative
 import           Control.Monad.Primitive
 import           Control.Monad.ST
-import           Control.Monad.Trans
-import           Control.Monad.Trans.State
+import           Control.Monad.State
+import           Data.Bifunctor
 import           Data.ByteString (ByteString)
 import           Data.Conduit
+import           Data.Conduit.Lift
 import           Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import           Data.Map.Strict (Map)
@@ -37,7 +41,7 @@ import qualified Data.Map.Strict as M
 import           Data.Reparsec
 import           Data.Reparsec.Sequence
 import           Data.Semigroup.Foldable
-import           Data.Sequence (Seq)
+import           Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
 import           Data.Text (Text)
 import           Data.Validation
@@ -45,6 +49,11 @@ import qualified Data.Vault.ST.Strict as Vault
 
 --------------------------------------------------------------------------------
 -- Types
+
+data ParseWarning
+  = IgnoredKey !Text
+  | LeftoverEvents (Seq Event)
+  deriving (Eq, Show)
 
 data ParseError
   = UserParseError !Text
@@ -229,25 +238,25 @@ finishObjectSM msm = Free.runAlt go (msmAlts msm)
 -- | Run an object parser on an event stream. Leftovers events that
 -- weren't consumed, in either success or failure case.
 valueSink ::
-     PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a)
+     PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a, Seq ParseWarning)
 valueSink valueParser = do
   mfirst <- await
   case mfirst of
     Just event -> do
       leftover event
       start
-    Nothing -> pure (Left EmptyDocument)
+    Nothing -> pure (Left EmptyDocument, mempty)
   where
     start = do
-      (menforceResult, loopResult) <-
+      (menforceResult, parseResult) <-
         fuseBothMaybe
           (enforceSchema (Just (valueParserSchema valueParser)))
           (loop (parseResultT (valueReparsec valueParser)))
       pure
         (case menforceResult of
-           Just SchemaOK -> loopResult
-           Nothing -> loopResult
-           Just (SchemaError err) -> Left (BadSchema err))
+           Just (SchemaOK, warnings) -> second (<> warnings) parseResult
+           Just (SchemaError err, warnings) -> (Left (BadSchema err), warnings)
+           Nothing -> parseResult)
     loop parser = do
       mevent <- await
       result <- parser (fmap pure mevent)
@@ -255,11 +264,20 @@ valueSink valueParser = do
         Partial resume -> do
           loop resume
         Failed remaining pos _more errors -> do
-          mapM_ leftover (Seq.drop pos remaining)
-          pure (Left errors)
+          leftovers <- makeLeftovers pos remaining
+          pure (Left errors, makeWarnings leftovers)
         Done remaining pos _more a -> do
-          mapM_ leftover (Seq.drop pos remaining)
-          pure (Right a)
+          leftovers <- makeLeftovers pos remaining
+          pure (Right a, makeWarnings leftovers)
+      where
+        makeLeftovers pos remaining = do
+          let leftovers = Seq.drop pos remaining
+          mapM_ leftover leftovers
+          pure leftovers
+        makeWarnings leftovers =
+          if Seq.null leftovers
+            then mempty
+            else pure (LeftoverEvents leftovers)
 
 --------------------------------------------------------------------------------
 -- Schema enforcing
@@ -294,11 +312,12 @@ instance Monoid Schema where
   mappend s1 s2 =
     Schema
       { schemaScalar = schemaScalar s1 || schemaScalar s2
-      , schemaObject = case (schemaObject s1,schemaObject s2) of
-                         (Just o1,Just o2) -> Just (M.unionWith mappend o1 o2)
-                         (Just o, Nothing) -> Just o
-                         (Nothing, Just o) -> Just o
-                         (Nothing, Nothing) -> Nothing
+      , schemaObject =
+          case (schemaObject s1, schemaObject s2) of
+            (Just o1, Just o2) -> Just (M.unionWith mappend o1 o2)
+            (Just o, Nothing) -> Just o
+            (Nothing, Just o) -> Just o
+            (Nothing, Nothing) -> Nothing
       , schemaArray = mappend (schemaArray s1) (schemaArray s2)
       }
   mempty =
@@ -330,79 +349,92 @@ objectParserSchema = go
         AltObject choices -> foldMap go choices
 
 -- | Enforce that the input events match the schema expected.
-enforceSchema :: Monad m => Maybe Schema -> ConduitT Event Event m SchemaValidation
-enforceSchema mschema = do
-  mnext <- await
-  case mnext of
-    Just event@(EventScalar {}) ->
-      case fmap schemaScalar mschema of
-        Just True -> do
-          yield event
-          pure SchemaOK
-        Just False -> pure (SchemaError (SchemaUnexpectedScalar event))
-        _ -> pure SchemaOK
-    Just ev@EventObjectStart {} ->
-      case fmap schemaObject mschema of
-        Just (Just obj) -> do
-          yield ev
-          let loop = do
-                mnext1 <- await
-                case mnext1 of
-                  Just e@EventObjectEnd -> do
-                    yield e
-                    pure SchemaOK
-                  Just e@(EventObjectKey key) -> do
-                    yield e
-                    result <- enforceSchema (M.lookup key obj)
-                    case result of
-                      SchemaOK -> loop
-                      SchemaError err -> pure (SchemaError err)
-                  Just e ->
-                    pure (SchemaError (SchemaWrongEventInObjectContext e))
-                  Nothing -> pure (SchemaError SchemaUnterminatedObject)
-           in loop
-        Just Nothing -> pure (SchemaError SchemaObjectNotAllowed)
-        Nothing ->
-          let loop = do
-                mnext1 <- await
-                case mnext1 of
-                  Just EventObjectEnd -> pure SchemaOK
-                  Just (EventObjectKey {}) -> enforceSchema Nothing *> loop
-                  Just e ->
-                    pure (SchemaError (SchemaWrongEventInObjectContext e))
-                  Nothing -> pure (SchemaError SchemaUnterminatedObject)
-           in loop
-    Just ev@EventArrayStart ->
-      case fmap schemaArray mschema of
-        Just Nothing -> pure (SchemaError SchemaArrayNotAllowed)
-        Just (Just schema) -> do
-          yield ev
-          let loop = do
-                mnext1 <- await
-                case mnext1 of
-                  Nothing -> pure (SchemaError SchemaUnterminatedArray)
-                  Just e@EventArrayEnd -> do
-                    yield e
-                    pure SchemaOK
-                  Just next -> do
-                    leftover next
-                    result <- enforceSchema (Just schema)
-                    case result of
-                      SchemaOK -> loop
-                      SchemaError err -> pure (SchemaError err)
-           in loop
-        Nothing ->
-          let loop = do
-                mnext1 <- await
-                case mnext1 of
-                  Nothing -> pure (SchemaError SchemaUnterminatedArray)
-                  Just EventArrayEnd -> pure SchemaOK
-                  Just next -> do
-                    leftover next
-                    result <- enforceSchema Nothing
-                    case result of
-                      SchemaOK -> loop
-                      SchemaError err -> pure (SchemaError err)
-           in loop
-    Just event -> pure (SchemaError (SchemaExpectedArrayOrObject event))
-    Nothing -> pure SchemaOK
+enforceSchema ::
+     Monad m
+  => Maybe Schema
+  -> ConduitT Event Event m (SchemaValidation, Seq ParseWarning)
+enforceSchema mschema0 = runStateC mempty (go mschema0)
+  where
+    go mschema = do
+      mnext <- await
+      case mnext of
+        Just event@(EventScalar {}) ->
+          case fmap schemaScalar mschema of
+            Just True -> do
+              yield event
+              pure SchemaOK
+            Just False -> pure (SchemaError (SchemaUnexpectedScalar event))
+            _ -> pure SchemaOK
+        Just ev@EventObjectStart {} ->
+          case fmap schemaObject mschema of
+            Just (Just obj) -> do
+              yield ev
+              let loop = do
+                    mnext1 <- await
+                    case mnext1 of
+                      Just e@EventObjectEnd -> do
+                        yield e
+                        pure SchemaOK
+                      Just e@(EventObjectKey key) -> do
+                        yield e
+                        let lookupResult = M.lookup key obj
+                        case lookupResult of
+                          Nothing -> lift (modify' (:|> IgnoredKey key))
+                          Just {} -> pure ()
+                        result <- go lookupResult
+                        case result of
+                          SchemaOK -> loop
+                          SchemaError err -> pure (SchemaError err)
+                      Just e ->
+                        pure (SchemaError (SchemaWrongEventInObjectContext e))
+                      Nothing -> pure (SchemaError SchemaUnterminatedObject)
+               in loop
+            Just Nothing -> pure (SchemaError SchemaObjectNotAllowed)
+            Nothing ->
+              let loop = do
+                    mnext1 <- await
+                    case mnext1 of
+                      Just EventObjectEnd -> pure SchemaOK
+                      Just (EventObjectKey {}) -> do
+                        result <- go Nothing
+                        case result of
+                          SchemaOK -> loop
+                          SchemaError err -> pure (SchemaError err)
+                      Just e ->
+                        pure (SchemaError (SchemaWrongEventInObjectContext e))
+                      Nothing -> pure (SchemaError SchemaUnterminatedObject)
+               in loop
+        Just ev@EventArrayStart ->
+          case fmap schemaArray mschema of
+            Just Nothing -> pure (SchemaError SchemaArrayNotAllowed)
+            Just (Just schema) -> do
+              yield ev
+              let loop = do
+                    mnext1 <- await
+                    case mnext1 of
+                      Nothing -> pure (SchemaError SchemaUnterminatedArray)
+                      Just e@EventArrayEnd -> do
+                        yield e
+                        pure SchemaOK
+                      Just next -> do
+                        leftover next
+                        result <- go (Just schema)
+                        case result of
+                          SchemaOK -> loop
+                          SchemaError err -> pure (SchemaError err)
+               in loop
+            Nothing ->
+              let loop = do
+                    mnext1 <- await
+                    case mnext1 of
+                      Nothing -> pure (SchemaError SchemaUnterminatedArray)
+                      Just EventArrayEnd -> pure SchemaOK
+                      Just next -> do
+                        leftover next
+                        result <- go Nothing
+                        case result of
+                          SchemaOK -> loop
+                          SchemaError err -> pure (SchemaError err)
+               in loop
+        Just event -> pure (SchemaError (SchemaExpectedArrayOrObject event))
+        Nothing -> pure SchemaOK
