@@ -274,6 +274,9 @@ data SchemaError
   | SchemaWrongEventInObjectContext !Event
   | SchemaExpectedArrayOrObject !Event
   | SchemaUnterminatedObject
+  | SchemaUnterminatedArray
+  | SchemaArrayNotAllowed
+  | SchemaObjectNotAllowed
   deriving (Show, Eq)
 
 -- | A schema of the shape of data that can be input.
@@ -351,7 +354,8 @@ enforceSchema mschema = do
                       case result of
                         SchemaOK -> loop
                         SchemaError err -> pure (SchemaError err)
-                    Just e -> pure (SchemaError (SchemaWrongEventInObjectContext e))
+                    Just e ->
+                      pure (SchemaError (SchemaWrongEventInObjectContext e))
                     Nothing -> pure (SchemaError SchemaUnterminatedObject)
              in loop
         Nothing ->
@@ -360,19 +364,20 @@ enforceSchema mschema = do
                 case mnext1 of
                   Just EventObjectEnd -> pure SchemaOK
                   Just (EventObjectKey {}) -> enforceSchema Nothing *> loop
-                  _ ->
-                    error
-                      "Expected only object end or object key here. (Ignored value)"
+                  Just e ->
+                    pure (SchemaError (SchemaWrongEventInObjectContext e))
+                  Nothing -> pure (SchemaError SchemaUnterminatedObject)
            in loop
-        _ -> error "Objects not allowed here."
+        _ -> pure (SchemaError SchemaObjectNotAllowed)
     Just ev@EventArrayStart ->
       case fmap schemaArray mschema of
-        Just Nothing -> error "Arrays not allowed here."
+        Just Nothing -> pure (SchemaError SchemaArrayNotAllowed)
         Just (Just schema) -> do
           yield ev
           let loop = do
                 mnext1 <- await
                 case mnext1 of
+                  Nothing -> pure (SchemaError SchemaUnterminatedArray)
                   Just e@EventArrayEnd -> do
                     yield e
                     pure SchemaOK
@@ -382,22 +387,19 @@ enforceSchema mschema = do
                     case result of
                       SchemaOK -> loop
                       SchemaError err -> pure (SchemaError err)
-                  _ -> error "Expected only array end or array value here."
            in loop
         Nothing ->
           let loop = do
                 mnext1 <- await
                 case mnext1 of
-                  Just EventArrayEnd ->
-                    pure SchemaOK
+                  Nothing -> pure (SchemaError SchemaUnterminatedArray)
+                  Just EventArrayEnd -> pure SchemaOK
                   Just next -> do
                     leftover next
                     result <- enforceSchema Nothing
                     case result of
                       SchemaOK -> loop
                       SchemaError err -> pure (SchemaError err)
-                  _ -> error "Expected only array end or array value here."
            in loop
-
     Just event -> pure (SchemaError (SchemaExpectedArrayOrObject event))
     Nothing -> pure SchemaOK
