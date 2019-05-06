@@ -55,6 +55,7 @@ data ParseError
   | ExpectedObjectKeyOrEndOfObject !Event
   | NoSuchKey
   | AltError !String
+  | EmptyDocument
   deriving (Show, Eq)
 
 instance Semigroup ParseError where
@@ -224,10 +225,17 @@ finishObjectSM msm = runAlt go (msmAlts msm)
 -- weren't consumed, in either success or failure case.
 valueSink ::
      PrimMonad m => ValueParser a -> ConduitT Event o m (Either ParseError a)
-valueSink valueParser =
-  enforceSchema (Just (valueParserSchema valueParser)) .|
-  loop (parseResultT (valueReparsec valueParser))
+valueSink valueParser = do
+  mfirst <- await
+  case mfirst of
+    Just event -> do
+      leftover event
+      start
+    Nothing -> pure (Left EmptyDocument)
   where
+    start =
+      enforceSchema (Just (valueParserSchema valueParser)) .|
+      loop (parseResultT (valueReparsec valueParser))
     loop parser = do
       mevent <- await
       result <- parser (fmap pure mevent)

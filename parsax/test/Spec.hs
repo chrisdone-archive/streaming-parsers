@@ -4,6 +4,7 @@
 
 import           Control.Monad.ST
 import           Data.Bifunctor
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import           Data.Conduit
@@ -31,7 +32,7 @@ spec = do
              (runST
                 (runConduit
                    (CL.sourceList [] .| valueSink (Object (PureObject ())))))
-             (Left NoMoreInput)))
+             (Left EmptyDocument)))
   describe
     "Reparsec"
     (do describe
@@ -131,7 +132,19 @@ spec = do
           (shouldReturn
              (do bytes <- S.readFile "test/assets/stack.yaml"
                  parseYamlByteString stackLikeGrammar bytes)
-             stackLikeResult))
+             stackLikeResult)
+        it
+          "Empty"
+          (shouldReturn
+             (parseYamlByteString (Array (Scalar pure)) "")
+             (Left EmptyDocument))
+        describe
+          "Variables"
+          (it
+             "Simple"
+             (shouldReturn
+                (parseYamlFile variablesGrammar "test/assets/variables.yaml")
+                (Right ["Apple","Beachball","Cartoon","Duckface","Apple"]))))
   where
     parsePeacemeal ::
          (forall s. ParserT (Seq Event) ParseError (ST s) a)
@@ -208,3 +221,6 @@ stackLikeGrammar =
                     "location"
                     (Scalar (first T.pack . readEither . S8.unpack)))))) <>
       Field "z" (Scalar (const (pure [Left 3])))))
+
+variablesGrammar :: ValueParser [ByteString]
+variablesGrammar = Array (Scalar pure)
