@@ -22,7 +22,7 @@ module Data.Parsax
   , ParseError (..)
   ) where
 
-import           Control.Alternative.Free
+import qualified Control.Alt.Free as Free
 import           Control.Applicative
 import           Control.Monad.Primitive
 import           Control.Monad.ST
@@ -34,13 +34,13 @@ import           Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import           Data.Maybe
 import           Data.Reparsec
 import           Data.Reparsec.Sequence
 import           Data.Semigroup.Foldable
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import           Data.Text (Text)
+import           Data.Validation
 import qualified Data.Vault.ST.Strict as Vault
 
 --------------------------------------------------------------------------------
@@ -53,7 +53,8 @@ data ParseError
   | Errors [ParseError]
   | ExpectedScalarButGot !Event
   | ExpectedObjectKeyOrEndOfObject !Event
-  | NoSuchKey
+  | NoSuchKey !Text
+  | NoSuchKeySM
   | AltError !String
   | EmptyDocument
   deriving (Show, Eq)
@@ -139,8 +140,8 @@ valueReparsec =
       !mappingSM <- lift (stToPrim (toMappingSM objectParser))
       result <- loop mappingSM
       case result of
-        Left stringError -> failWith (AltError stringError)
-        Right a -> pure a
+        Failure err -> failWith err
+        Success a -> pure a
     Array valueParser ->
       around
         EventArrayStart
@@ -169,20 +170,21 @@ objectReparsec msm textKey = do
           , msmVault = updateVault (msmVault msm)
           }
   where
-    makeAttempt (ParserPair (EitherKey key) valueParser) = do
+    makeAttempt (ParserPair (EitherKey _ key) valueParser) = do
       result <- valueReparsec valueParser
       pure (Vault.insert key (Right result))
 
 --------------------------------------------------------------------------------
 -- MSM
 
-newtype EitherKey s a = EitherKey (Vault.Key s (Either String a))
+data EitherKey s a =
+  EitherKey !Text !(Vault.Key s (Either ParseError a))
 
 data ParserPair s where
   ParserPair :: EitherKey s a -> ValueParser a -> ParserPair s
 
 data MappingSM s a = MappingSM
-  { msmAlts :: !(Alt (EitherKey s) a)
+  { msmAlts :: !(Free.Alt (EitherKey s) a)
   , msmParsers :: !(Map Text (NonEmpty (ParserPair s)))
   , msmVault :: !(Vault.Vault s)
   }
@@ -194,7 +196,7 @@ toMappingSM mp = do
   where
     go ::
          ObjectParser a
-      -> StateT (Map Text (NonEmpty (ParserPair s))) (ST s) (Alt (EitherKey s) a)
+      -> StateT (Map Text (NonEmpty (ParserPair s))) (ST s) (Free.Alt (EitherKey s) a)
     go (PureObject a) = pure $ pure a
     go (FMapObject f x) = do
       x' <- go x
@@ -207,16 +209,20 @@ toMappingSM mp = do
       xs' <- mapM go xs
       pure $ asum1 xs'
     go (Field t p) = do
-      key <- lift $ EitherKey <$> Vault.newKey
+      key <- lift $ EitherKey t <$> Vault.newKey
       let pp = ParserPair key p
       modify' $ M.insertWith (flip (<>)) t (pp :| [])
-      pure $ Alt [Ap key (pure id)]
+      pure $ Free.Alt (pure (Free.Ap key (pure id)))
 
-finishObjectSM :: forall s b. MappingSM s b -> Either String b
-finishObjectSM msm = runAlt go (msmAlts msm)
+finishObjectSM :: forall s b. MappingSM s b -> Validation ParseError b
+finishObjectSM msm = Free.runAlt go (msmAlts msm)
   where
-    go :: forall a. EitherKey s a -> Either String a
-    go (EitherKey key) = fromMaybe (Left "not found") $ Vault.lookup key (msmVault msm)
+    go :: forall a. EitherKey s a -> Validation ParseError a
+    go (EitherKey keyText key) =
+      maybe
+        (Failure (NoSuchKey keyText))
+        (either Failure Success)
+        (Vault.lookup key (msmVault msm))
 
 --------------------------------------------------------------------------------
 -- Conduits
