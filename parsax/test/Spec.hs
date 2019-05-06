@@ -140,11 +140,16 @@ spec = do
              (Left EmptyDocument))
         describe
           "Variables"
-          (it
-             "Simple"
-             (shouldReturn
-                (parseYamlFile variablesGrammar "test/assets/variables.yaml")
-                (Right ["Apple","Beachball","Cartoon","Duckface","Apple"]))))
+          (do it
+                "Simple"
+                (shouldReturn
+                   (parseYamlFile variablesGrammar "test/assets/variables.yaml")
+                   (Right ["Apple","Beachball","Cartoon","Duckface","Apple"]))
+              it
+                "Object sized"
+                (shouldReturn
+                   (parseYamlFile stackLikeGrammar "test/assets/stack-variables.yaml")
+                   stackLikeResultVars)))
   where
     parsePeacemeal ::
          (forall s. ParserT (Seq Event) ParseError (ST s) a)
@@ -173,6 +178,9 @@ spec = do
 
 stackLikeResult :: Either ParseError (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
+
+stackLikeResultVars :: Either ParseError (Int, [Either Int Int])
+stackLikeResultVars = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int), Right (666 :: Int)]))
 
 stackLikeInputsWithBogusFields :: Seq Event
 stackLikeInputsWithBogusFields =
@@ -207,20 +215,14 @@ stackLikeInputs =
   ]
 
 stackLikeGrammar :: ValueParser (Int, [Either Int Int])
-stackLikeGrammar =
-  Object
-    ((,) <$> Field "y" (Scalar (first T.pack . readEither . S8.unpack)) <*>
-     (Field
-        "x"
-        (Array
-           (fmap Left (Scalar (first T.pack . readEither . S8.unpack)) <>
-            fmap
-              Right
-              (Object
-                 (Field
-                    "location"
-                    (Scalar (first T.pack . readEither . S8.unpack)))))) <>
-      Field "z" (Scalar (const (pure [Left 3])))))
+stackLikeGrammar = Object ((,) <$> yfield <*> (xfield <> zfield))
+  where
+    yfield = Field "y" int
+    xfield = Field "x" xarray
+    xarray = Array (fmap Left int <> fmap Right loc)
+    zfield = fmap (pure . Left) (Field "z" int)
+    loc = Object (Field "location" int)
+    int = Scalar (first T.pack . readEither . S8.unpack)
 
 variablesGrammar :: ValueParser [ByteString]
 variablesGrammar = Array (Scalar pure)
