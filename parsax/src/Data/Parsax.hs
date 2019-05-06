@@ -54,9 +54,8 @@ data ParseError
   | ExpectedScalarButGot !Event
   | ExpectedObjectKeyOrEndOfObject !Event
   | NoSuchKey !Text
-  | NoSuchKeySM
-  | AltError !String
   | EmptyDocument
+  | BadSchema !SchemaError
   deriving (Show, Eq)
 
 instance Semigroup ParseError where
@@ -239,9 +238,16 @@ valueSink valueParser = do
       start
     Nothing -> pure (Left EmptyDocument)
   where
-    start =
-      enforceSchema (Just (valueParserSchema valueParser)) .|
-      loop (parseResultT (valueReparsec valueParser))
+    start = do
+      (menforceResult, loopResult) <-
+        fuseBothMaybe
+          (enforceSchema (Just (valueParserSchema valueParser)))
+          (loop (parseResultT (valueReparsec valueParser)))
+      pure
+        (case menforceResult of
+           Just SchemaOK -> loopResult
+           Nothing -> loopResult
+           Just (SchemaError err) -> Left (BadSchema err))
     loop parser = do
       mevent <- await
       result <- parser (fmap pure mevent)
@@ -257,6 +263,18 @@ valueSink valueParser = do
 
 --------------------------------------------------------------------------------
 -- Schema enforcing
+
+data SchemaValidation
+  = SchemaOK
+  | SchemaError SchemaError
+  deriving (Show, Eq)
+
+data SchemaError
+  = SchemaUnexpectedScalar !Event
+  | SchemaWrongEventInObjectContext !Event
+  | SchemaExpectedArrayOrObject !Event
+  | SchemaUnterminatedObject
+  deriving (Show, Eq)
 
 -- | A schema of the shape of data that can be input.
 data Schema =
@@ -305,15 +323,17 @@ objectParserSchema = go
         AltObject choices -> foldMap go choices
 
 -- | Enforce that the input events match the schema expected.
-enforceSchema :: Monad m => Maybe Schema -> ConduitT Event Event m ()
+enforceSchema :: Monad m => Maybe Schema -> ConduitT Event Event m SchemaValidation
 enforceSchema mschema = do
   mnext <- await
   case mnext of
     Just event@(EventScalar {}) ->
       case fmap schemaScalar mschema of
-        Just True -> yield event
-        Just False -> error "Scalars not allowed here."
-        _ -> pure ()
+        Just True -> do
+          yield event
+          pure SchemaOK
+        Just False -> pure (SchemaError (SchemaUnexpectedScalar event))
+        _ -> pure SchemaOK
     Just ev@EventObjectStart {} ->
       case fmap schemaObject mschema of
         Just obj
@@ -322,18 +342,23 @@ enforceSchema mschema = do
             let loop = do
                   mnext1 <- await
                   case mnext1 of
-                    Just e@EventObjectEnd -> yield e
-                    Just e@(EventObjectKey key) ->
-                      yield e *> enforceSchema (M.lookup key obj) *> loop
-                    _ ->
-                      error
-                        "Expected only object end or object key here. (Ignored value)"
+                    Just e@EventObjectEnd -> do
+                      yield e
+                      pure SchemaOK
+                    Just e@(EventObjectKey key) -> do
+                      yield e
+                      result <- enforceSchema (M.lookup key obj)
+                      case result of
+                        SchemaOK -> loop
+                        SchemaError err -> pure (SchemaError err)
+                    Just e -> pure (SchemaError (SchemaWrongEventInObjectContext e))
+                    Nothing -> pure (SchemaError SchemaUnterminatedObject)
              in loop
         Nothing ->
           let loop = do
                 mnext1 <- await
                 case mnext1 of
-                  Just EventObjectEnd -> pure ()
+                  Just EventObjectEnd -> pure SchemaOK
                   Just (EventObjectKey {}) -> enforceSchema Nothing *> loop
                   _ ->
                     error
@@ -348,23 +373,31 @@ enforceSchema mschema = do
           let loop = do
                 mnext1 <- await
                 case mnext1 of
-                  Just e@EventArrayEnd -> yield e
+                  Just e@EventArrayEnd -> do
+                    yield e
+                    pure SchemaOK
                   Just next -> do
                     leftover next
-                    enforceSchema (Just schema)
-                    loop
+                    result <- enforceSchema (Just schema)
+                    case result of
+                      SchemaOK -> loop
+                      SchemaError err -> pure (SchemaError err)
                   _ -> error "Expected only array end or array value here."
            in loop
         Nothing ->
           let loop = do
                 mnext1 <- await
                 case mnext1 of
-                  Just EventArrayEnd -> pure ()
+                  Just EventArrayEnd ->
+                    pure SchemaOK
                   Just next -> do
                     leftover next
-                    enforceSchema Nothing
-                    loop
+                    result <- enforceSchema Nothing
+                    case result of
+                      SchemaOK -> loop
+                      SchemaError err -> pure (SchemaError err)
                   _ -> error "Expected only array end or array value here."
            in loop
-    Nothing -> pure ()
-    Just _ -> error ("Unexpected non-starting or scalar here: " ++ show mnext)
+
+    Just event -> pure (SchemaError (SchemaExpectedArrayOrObject event))
+    Nothing -> pure SchemaOK

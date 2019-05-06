@@ -113,7 +113,7 @@ spec = do
     (describe
        "Object"
        (it
-          "Object"
+          "Object with bogus fields"
           (shouldBe
              (runST
                 (runConduit
