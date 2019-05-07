@@ -32,7 +32,9 @@ library
                        aeson,
                        libyaml,
                        resourcet,
-                       validation
+                       validation,
+                       attoparsec,
+                       conduit-extra
   default-language:    Haskell2010
 
 test-suite parsax-test
