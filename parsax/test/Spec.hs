@@ -15,6 +15,7 @@ import           Data.Parsax.Yaml
 import           Data.Reparsec
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
+import           Data.Text (Text)
 import qualified Data.Text as T
 import           Test.Hspec
 import           Text.Read
@@ -32,7 +33,7 @@ spec = do
              (runST
                 (runConduit
                    (CL.sourceList [] .| valueSink (Object (PureObject ())))))
-             (Left EmptyDocument, mempty)))
+             (Left (EmptyDocument :: ParseError ()), mempty)))
   describe
     "Reparsec"
     (do describe
@@ -72,7 +73,7 @@ spec = do
                       (valueReparsec
                          (Scalar (first T.pack . readEither . S8.unpack)))
                       [EventScalar "a"])
-                   (Left (UserParseError "Prelude.read: no parse") :: Either ParseError Int)))
+                   (Left (UserError "Prelude.read: no parse") :: Either (ParseError Text) Int)))
         describe
           "Array"
           (do it
@@ -91,7 +92,7 @@ spec = do
                             (Scalar (first T.pack . readEither . S8.unpack) <>
                              Scalar (const (Left "")))))
                       [EventArrayStart, EventScalar "a", EventArrayEnd])
-                   (Left (UnexpectedEvent (EventScalar "a")) :: Either ParseError [Int])))
+                   (Left (UnexpectedEvent (EventScalar "a")) :: Either (ParseError Text) [Int])))
         describe
           "Object"
           (do it
@@ -127,7 +128,7 @@ spec = do
                    (runConduit
                       (CL.sourceList [EventObjectStart, EventObjectEnd] .|
                        valueSink (Object (pure ())))))
-                (Right (), mempty))))
+                (Right () :: Either (ParseError ()) (), mempty))))
   describe
     "Yaml"
     (do it
@@ -145,7 +146,7 @@ spec = do
           "Empty"
           (shouldReturn
              (parseYamlByteString (Array (Scalar pure)) "")
-             (Left EmptyDocument, mempty))
+             (Left (EmptyDocument :: ParseError ()), mempty))
         describe
           "Variables"
           (do it
@@ -164,9 +165,9 @@ spec = do
                    (stackLikeResultVars, mempty))))
   where
     parsePeacemeal ::
-         (forall s. ParserT (Seq Event) ParseError (ST s) a)
+         (forall s. ParserT (Seq Event) (ParseError Text) (ST s) a)
       -> Seq Event
-      -> Either ParseError a
+      -> Either (ParseError Text) a
     parsePeacemeal p input =
       runST
         (let loop i = do
@@ -180,18 +181,18 @@ spec = do
                      else loop (i + 1)
           in loop 0)
     parseOnly ::
-         (forall s. ParserT (Seq Event) ParseError (ST s) a)
+         (forall s. ParserT (Seq Event) (ParseError Text) (ST s) a)
       -> Seq Event
-      -> Either ParseError a
+      -> Either (ParseError Text) a
     parseOnly p i = runST (parseOnlyT p i)
 
 --------------------------------------------------------------------------------
 -- stack.yaml-like test data
 
-stackLikeResult :: Either ParseError (Int, [Either Int Int])
+stackLikeResult :: Either (ParseError e) (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
 
-stackLikeResultVars :: Either ParseError (Int, [Either Int Int])
+stackLikeResultVars :: Either (ParseError e) (Int, [Either Int Int])
 stackLikeResultVars =
   (Right
      ( 2 :: Int
@@ -234,7 +235,7 @@ stackLikeInputs =
   , EventObjectEnd
   ]
 
-stackLikeGrammar :: ValueParser (Int, [Either Int Int])
+stackLikeGrammar :: ValueParser Text m (Int, [Either Int Int])
 stackLikeGrammar = Object ((,) <$> yfield <*> (xfield <> zfield))
   where
     yfield = Field "y" int
@@ -244,5 +245,5 @@ stackLikeGrammar = Object ((,) <$> yfield <*> (xfield <> zfield))
     loc = Object (Field "location" int)
     int = Scalar (first T.pack . readEither . S8.unpack)
 
-variablesGrammar :: ValueParser [ByteString]
+variablesGrammar :: ValueParser () m [ByteString]
 variablesGrammar = Array (Scalar pure)

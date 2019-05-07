@@ -55,11 +55,11 @@ data ParseWarning
   | LeftoverEvents (Seq Event)
   deriving (Eq, Show)
 
-data ParseError
-  = UserParseError !Text
+data ParseError e
+  = UserError !e
   | NoMoreInput
   | UnexpectedEvent !Event
-  | Errors [ParseError]
+  | Errors [ParseError e]
   | ExpectedScalarButGot !Event
   | ExpectedObjectKeyOrEndOfObject !Event
   | NoSuchKey !Text
@@ -67,14 +67,14 @@ data ParseError
   | BadSchema !SchemaError
   deriving (Show, Eq)
 
-instance Semigroup ParseError where
+instance Semigroup (ParseError e) where
   Errors xs <> Errors ys = Errors (xs <> ys)
   Errors xs <> y = Errors (xs <> [y])
   x <> Errors ys = Errors ([x] <> ys)
   x <> y = Errors [x,y]
 
-instance NoMoreInput ParseError where noMoreInputError = NoMoreInput
-instance UnexpectedToken Event ParseError where unexpectedToken = UnexpectedEvent
+instance NoMoreInput (ParseError e) where noMoreInputError = NoMoreInput
+instance UnexpectedToken Event (ParseError e) where unexpectedToken = UnexpectedEvent
 
 -- | A SAX event, containing either a scalar, array or object with keys.
 data Event
@@ -87,39 +87,40 @@ data Event
   deriving (Show, Eq)
 
 -- | Parser of an object.
-data ObjectParser a where
-  Field :: Text -> ValueParser a -> ObjectParser a
-  LiftA2 :: (b -> c -> a) -> ObjectParser b -> ObjectParser c -> ObjectParser a
-  FMapObject :: (x -> a) -> ObjectParser x -> ObjectParser a
-  AltObject :: (NonEmpty (ObjectParser a)) -> ObjectParser a
-  PureObject :: a -> ObjectParser a
+data ObjectParser e m a where
+  Field :: Text -> ValueParser e m a -> ObjectParser e m a
+  LiftA2 :: (b -> c -> a) -> ObjectParser e m b -> ObjectParser e m c -> ObjectParser e m a
+  FMapObject :: (x -> a) -> ObjectParser e m x -> ObjectParser e m a
+  AltObject :: (NonEmpty (ObjectParser e m a)) -> ObjectParser e m a
+  PureObject :: a -> ObjectParser e m a
 
-instance Functor ObjectParser where
+instance Functor (ObjectParser e m) where
   fmap = FMapObject
 
-instance Applicative ObjectParser where
+instance Applicative (ObjectParser e m) where
   liftA2 = LiftA2
   pure = PureObject
 
-instance Semigroup (ObjectParser a) where
+instance Semigroup (ObjectParser e m a) where
   AltObject xs <> AltObject ys = AltObject (xs <> ys)
   AltObject xs <> y = AltObject (xs <> (y :| []))
   x <> AltObject ys = AltObject ((x :| []) <> ys)
   x <> y = AltObject (x :| [y])
 
 -- | Parser of a value.
-data ValueParser a where
-  Scalar :: (ByteString -> Either Text a) -> ValueParser a
-  Object :: ObjectParser a -> ValueParser a
-  Array :: ValueParser a -> ValueParser [a]
-  FMapValue :: (x -> a) -> ValueParser x -> ValueParser a
-  AltValue :: NonEmpty (ValueParser a) -> ValueParser a
-  PureValue :: a -> ValueParser a
+data ValueParser e m a where
+  Scalar :: (ByteString -> Either e a) -> ValueParser e m a
+  Object :: ObjectParser e m a -> ValueParser e m a
+  Array :: ValueParser e m a -> ValueParser e m [a]
+  FMapValue :: (x -> a) -> ValueParser e m x -> ValueParser e m a
+  AltValue :: NonEmpty (ValueParser e m a) -> ValueParser e m a
+  PureValue :: a -> ValueParser e m a
+  CheckValue :: (i -> m (Either e a)) -> ValueParser e m i -> ValueParser e m a
 
-instance Functor ValueParser where
+instance Functor (ValueParser e m) where
   fmap = FMapValue
 
-instance Semigroup (ValueParser a) where
+instance Semigroup (ValueParser e m a) where
   AltValue xs <> AltValue ys = AltValue (xs <> ys)
   AltValue xs <> y = AltValue (xs <> (y :| []))
   x <> AltValue ys = AltValue ((x :| []) <> ys)
@@ -129,10 +130,19 @@ instance Semigroup (ValueParser a) where
 -- Reparsecs
 
 -- | Make a reparsec out of a value parser.
-valueReparsec :: PrimMonad m => ValueParser a -> ParserT (Seq Event) ParseError m a
+valueReparsec ::
+     PrimMonad m
+  => ValueParser e m a
+  -> ParserT (Seq Event) (ParseError e) m a
 valueReparsec =
   \case
     PureValue a -> pure a
+    CheckValue f m -> do
+      i <- valueReparsec m
+      result <- lift (f i)
+      case result of
+        Left err -> failWith (UserError err)
+        Right b -> pure b
     AltValue xs -> foldMap1 valueReparsec xs
     FMapValue f valueParser -> fmap f (valueReparsec valueParser)
     Object objectParser -> do
@@ -161,15 +171,18 @@ valueReparsec =
         EventScalar bs ->
           case parse bs of
             Right v -> pure v
-            Left err -> failWith (UserParseError err)
+            Left err -> failWith (UserError err)
         els -> failWith (ExpectedScalarButGot els)
 
 -- | Make a reparsec out of an object parser.
-objectReparsec :: PrimMonad m => MappingSM s a -> Text -> ParserT (Seq Event) ParseError m (MappingSM s a)
+objectReparsec ::
+     PrimMonad m
+  => MappingSM s e m a
+  -> Text
+  -> ParserT (Seq Event) (ParseError e) m (MappingSM s e m a)
 objectReparsec msm textKey = do
   case M.lookup textKey (msmParsers msm) of
-    Nothing ->
-      pure msm
+    Nothing -> pure msm
     Just xs -> do
       updateVault <- foldMap1 makeAttempt xs
       pure
@@ -185,26 +198,26 @@ objectReparsec msm textKey = do
 --------------------------------------------------------------------------------
 -- MSM
 
-data EitherKey s a =
-  EitherKey !Text !(Vault.Key s (Either ParseError a))
+data EitherKey s e a where
+  EitherKey :: !Text -> !(Vault.Key s (Either (ParseError e) a)) -> EitherKey s e a
 
-data ParserPair s where
-  ParserPair :: EitherKey s a -> ValueParser a -> ParserPair s
+data ParserPair e m s where
+  ParserPair :: EitherKey s e a -> ValueParser e m a -> ParserPair e m s
 
-data MappingSM s a = MappingSM
-  { msmAlts :: !(Free.Alt (EitherKey s) a)
-  , msmParsers :: !(Map Text (NonEmpty (ParserPair s)))
+data MappingSM s e m a = MappingSM
+  { msmAlts :: !(Free.Alt (EitherKey s e) a)
+  , msmParsers :: !(Map Text (NonEmpty (ParserPair e m s)))
   , msmVault :: !(Vault.Vault s)
   }
 
-toMappingSM :: ObjectParser a -> ST s (MappingSM s a)
+toMappingSM :: ObjectParser e m a -> ST s (MappingSM s e m a)
 toMappingSM mp = do
   (alts, parsers) <- runStateT (go mp) mempty
   pure MappingSM {msmAlts = alts, msmParsers = parsers, msmVault = Vault.empty}
   where
     go ::
-         ObjectParser a
-      -> StateT (Map Text (NonEmpty (ParserPair s))) (ST s) (Free.Alt (EitherKey s) a)
+         ObjectParser e m a
+      -> StateT (Map Text (NonEmpty (ParserPair e m s))) (ST s) (Free.Alt (EitherKey s e) a)
     go (PureObject a) = pure $ pure a
     go (FMapObject f x) = do
       x' <- go x
@@ -220,12 +233,13 @@ toMappingSM mp = do
       key <- lift $ EitherKey t <$> Vault.newKey
       let pp = ParserPair key p
       modify' $ M.insertWith (flip (<>)) t (pp :| [])
-      pure $ Free.Alt (pure (Free.Ap key (pure id)))
+      pure $ Free.Alt (pure (toAltF key))
+    toAltF x = Free.Ap x (pure id)
 
-finishObjectSM :: forall s b. MappingSM s b -> Validation ParseError b
+finishObjectSM :: forall s b e m. MappingSM s e m b -> Validation (ParseError e) b
 finishObjectSM msm = Free.runAlt go (msmAlts msm)
   where
-    go :: forall a. EitherKey s a -> Validation ParseError a
+    go :: forall a. EitherKey s e a -> Validation (ParseError e) a
     go (EitherKey keyText key) =
       maybe
         (Failure (NoSuchKey keyText))
@@ -239,8 +253,8 @@ finishObjectSM msm = Free.runAlt go (msmAlts msm)
 -- weren't consumed, in either success or failure case.
 valueSink ::
      PrimMonad m
-  => ValueParser a
-  -> ConduitT Event o m (Either ParseError a, Seq ParseWarning)
+  => ValueParser e m a
+  -> ConduitT Event o m (Either (ParseError e) a, Seq ParseWarning)
 valueSink valueParser = do
   mfirst <- await
   case mfirst of
@@ -260,7 +274,7 @@ valueSink valueParser = do
            (SchemaError err, warnings) -> (Left (BadSchema err), warnings))
     loop parser = do
       mevent <- await
-      result <- parser (fmap pure mevent)
+      result <- lift (parser (fmap pure mevent))
       case result of
         Partial resume -> do
           loop resume
@@ -325,7 +339,7 @@ instance Monoid Schema where
     Schema {schemaScalar = False, schemaObject = mempty, schemaArray = mempty}
 
 -- | Create a schema out of a value parser.
-valueParserSchema :: ValueParser a -> Schema
+valueParserSchema :: ValueParser e m a -> Schema
 valueParserSchema =
   \case
     Scalar {} -> mempty {schemaScalar = True}
@@ -334,12 +348,13 @@ valueParserSchema =
     FMapValue _ v -> valueParserSchema v
     PureValue {} -> mempty
     AltValue choices -> foldMap valueParserSchema (NE.toList choices)
+    CheckValue _f v -> valueParserSchema v
 
 -- | Create a schema out of an object parser.
-objectParserSchema :: ObjectParser a -> Map Text Schema
+objectParserSchema :: ObjectParser e m a -> Map Text Schema
 objectParserSchema = go
   where
-    go :: ObjectParser a -> Map Text Schema
+    go :: ObjectParser e m a -> Map Text Schema
     go =
       \case
         Field key valueParser ->
