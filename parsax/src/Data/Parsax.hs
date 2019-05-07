@@ -29,7 +29,7 @@ import qualified Control.Alt.Free as Free
 import           Control.Applicative
 import           Control.Monad.Primitive
 import           Control.Monad.ST
-import           Control.Monad.State
+import           Control.Monad.State.Strict
 import           Data.Bifunctor
 import           Data.ByteString (ByteString)
 import           Data.Conduit
