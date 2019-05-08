@@ -19,6 +19,7 @@ module Data.Parsax
   , valueParserSchema
   , Schema(..)
   , Event(..)
+  , Scalar(..)
   , ObjectParser(..)
   , ValueParser(..)
   , ParseError(..)
@@ -31,7 +32,6 @@ import           Control.Monad.Primitive
 import           Control.Monad.ST
 import           Control.Monad.State.Strict
 import           Data.Bifunctor
-import           Data.ByteString (ByteString)
 import           Data.Conduit
 import           Data.Conduit.Lift
 import           Data.List.NonEmpty (NonEmpty(..))
@@ -40,6 +40,7 @@ import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import           Data.Reparsec
 import           Data.Reparsec.Sequence
+import           Data.Scientific
 import           Data.Semigroup.Foldable
 import           Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
@@ -78,12 +79,20 @@ instance UnexpectedToken Event (ParseError e) where unexpectedToken = Unexpected
 
 -- | A SAX event, containing either a scalar, array or object with keys.
 data Event
-  = EventScalar !ByteString
+  = EventScalar !Scalar
   | EventArrayStart
   | EventArrayEnd
   | EventObjectStart
   | EventObjectKey !Text
   | EventObjectEnd
+  deriving (Show, Eq)
+
+-- | A constant atomic value.
+data Scalar
+  = ScientificScalar !Scientific
+  | TextScalar !Text
+  | BoolScalar !Bool
+  | NullScalar
   deriving (Show, Eq)
 
 -- | Parser of an object.
@@ -109,7 +118,7 @@ instance Semigroup (ObjectParser e m a) where
 
 -- | Parser of a value.
 data ValueParser e m a where
-  Scalar :: (ByteString -> Either e a) -> ValueParser e m a
+  Scalar :: (Scalar -> Either e a) -> ValueParser e m a
   Object :: ObjectParser e m a -> ValueParser e m a
   Array :: ValueParser e m a -> ValueParser e m [a]
   FMapValue :: (x -> a) -> ValueParser e m x -> ValueParser e m a

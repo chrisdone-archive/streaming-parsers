@@ -116,15 +116,15 @@ getValueEvent = do
   skipSpace
   w <- A.peekWord8'
   case w of
-    DOUBLE_QUOTE -> skip *> (EventScalar . T.encodeUtf8 <$> Aeson.jstring_) -- TODO: consolidate text types.
+    DOUBLE_QUOTE -> skip *> (EventScalar . TextScalar <$> Aeson.jstring_) -- TODO: consolidate text types.
     OPEN_CURLY -> skip *> pure EventObjectStart
     OPEN_SQUARE -> skip *> pure EventArrayStart
-    C_f -> A.string "false" *> pure (EventScalar "false") -- TODO: consolidate basic scalars.
-    C_t -> A.string "true" *> pure (EventScalar "true") -- TODO: consolidate basic scalars.
-    C_n -> A.string "null" *> pure (EventScalar "null") -- TODO: consolidate basic scalars.
+    C_f -> A.string "false" *> pure (EventScalar (BoolScalar False)) -- TODO: consolidate basic scalars.
+    C_t -> A.string "true" *> pure (EventScalar (BoolScalar True)) -- TODO: consolidate basic scalars.
+    C_n -> A.string "null" *> pure (EventScalar NullScalar) -- TODO: consolidate basic scalars.
     _
       | w >= 48 && w <= 57 || w == 45 ->
-        EventScalar . S8.pack . show <$> Aeson.scientific -- TODO: consolidate basic scalars.
+        EventScalar . ScientificScalar <$> Aeson.scientific -- TODO: consolidate basic scalars.
       | otherwise -> fail "not a valid json value"
 
 skip :: Parser ()

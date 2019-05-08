@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
@@ -13,19 +14,27 @@ module Data.Parsax.Yaml
   , eventConduit
   ) where
 
+import           Control.Applicative
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
+import qualified Data.Attoparsec.Text as Atto
+import           Data.Bits
 import           Data.ByteString (ByteString)
+import           Data.Char
 import           Data.Conduit
 import           Data.Foldable
 import           Data.IORef
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import           Data.Parsax
+import           Data.Scientific
 import           Data.Sequence (Seq(..))
+import           Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.Text.Encoding.Error as T
 import qualified Text.Libyaml as Libyaml
 
 -- | Parse from a file.
@@ -80,8 +89,11 @@ value = do
           case result of
             Nothing -> error ("No such anchor " ++ show anchorName)
             Just events -> mapM_ yield events
-        Libyaml.EventScalar !bs !_tag !_style !manchor ->
-          bind manchor (yield (EventScalar bs))
+        Libyaml.EventScalar !bs !tag !style !manchor ->
+          bind
+            manchor
+            (let !text = T.decodeUtf8With T.lenientDecode bs
+              in yield (EventScalar (textToValue style tag text)))
         Libyaml.EventSequenceStart !_tag !_sequencestyle !manchor ->
           bind manchor array
         Libyaml.EventMappingStart !_tag !_mappingstyle !manchor ->
@@ -194,3 +206,34 @@ record src = src .| recording
               yield i
               let !consed = acc :|> i
               go consed
+
+--------------------------------------------------------------------------------
+-- Scalar utilities
+--
+-- Lifted from the yaml package.
+
+textToValue :: Libyaml.Style -> Libyaml.Tag -> Text -> Scalar
+textToValue Libyaml.SingleQuoted _ t = TextScalar t
+textToValue Libyaml.DoubleQuoted _ t = TextScalar t
+textToValue _ Libyaml.StrTag t = TextScalar t
+textToValue Libyaml.Folded _ t = TextScalar t
+textToValue _ _ t
+    | t `elem` ["null", "Null", "NULL", "~", ""] = NullScalar
+    | any (t `isLike`) ["y", "yes", "on", "true"] = BoolScalar True
+    | any (t `isLike`) ["n", "no", "off", "false"] = BoolScalar False
+    | Right x <- textToScientific t = ScientificScalar x
+    | otherwise = TextScalar t
+  where x `isLike` ref = x `elem` [ref, T.toUpper ref, titleCased]
+          where titleCased = toUpper (T.head ref) `T.cons` T.tail ref
+
+textToScientific :: Text -> Either String Scientific
+textToScientific = Atto.parseOnly (num <* Atto.endOfInput)
+  where
+    num = (fromInteger <$> ("0x" *> Atto.hexadecimal))
+      <|> (fromInteger <$> ("0o" *> octal))
+      <|> Atto.scientific
+
+    octal = T.foldl' step 0 <$> Atto.takeWhile1 isOctalDigit
+      where
+        isOctalDigit c = (c >= '0' && c <= '7')
+        step a c = (a `shiftL` 3) .|. fromIntegral (ord c - 48)

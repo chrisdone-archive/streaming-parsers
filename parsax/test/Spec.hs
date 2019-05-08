@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -13,6 +14,7 @@ import           Data.Foldable
 import           Data.Parsax
 import           Data.Parsax.Yaml
 import           Data.Reparsec
+import           Data.Scientific
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import           Data.Text (Text)
@@ -50,14 +52,14 @@ spec = do
                 (shouldBe
                    (parseOnly
                       (valueReparsec (FMapValue (+ 1) (Scalar (const (pure 1)))))
-                      [EventScalar "1"])
+                      [EventScalar (TextScalar "1")])
                    (Right (2 :: Int)))
               it
                 "Value"
                 (shouldBe
                    (parseOnly
                       (valueReparsec (Scalar (const (pure 1))))
-                      [EventScalar "1"])
+                      [EventScalar (TextScalar "1")])
                    (Right (1 :: Int)))
               it
                 "Value no input"
@@ -71,9 +73,9 @@ spec = do
                 (shouldBe
                    (parseOnly
                       (valueReparsec
-                         (Scalar (first T.pack . readEither . S8.unpack)))
-                      [EventScalar "a"])
-                   (Left (UserError "Prelude.read: no parse") :: Either (ParseError Text) Int)))
+                         intScalar)
+                      [EventScalar (TextScalar "a")])
+                   (Left (UserError "Expected integer.") :: Either (ParseError Text) Int)))
         describe
           "Array"
           (do it
@@ -81,7 +83,7 @@ spec = do
                 (shouldBe
                    (parseOnly
                       (valueReparsec (Array (Scalar (const (pure 1)))))
-                      [EventArrayStart, EventScalar "1", EventArrayEnd])
+                      [EventArrayStart, EventScalar (TextScalar "1"), EventArrayEnd])
                    (Right [1 :: Int]))
               it
                 "Array error"
@@ -89,10 +91,10 @@ spec = do
                    (parseOnly
                       (valueReparsec
                          (Array
-                            (Scalar (first T.pack . readEither . S8.unpack) <>
+                            (intScalar <>
                              Scalar (const (Left "")))))
-                      [EventArrayStart, EventScalar "a", EventArrayEnd])
-                   (Left (UnexpectedEvent (EventScalar "a")) :: Either (ParseError Text) [Int])))
+                      [EventArrayStart, EventScalar (TextScalar "a"), EventArrayEnd])
+                   (Left (UnexpectedEvent (EventScalar (TextScalar "a"))) :: Either (ParseError Text) [Int])))
         describe
           "Object"
           (do it
@@ -154,7 +156,7 @@ spec = do
                 (shouldReturn
                    (parseYamlFile variablesGrammar "test/assets/variables.yaml")
                    ( Right
-                       ["Apple", "Beachball", "Cartoon", "Duckface", "Apple"]
+                       (map TextScalar ["Apple", "Beachball", "Cartoon", "Duckface", "Apple"])
                    , mempty))
               it
                 "Object sized"
@@ -208,14 +210,14 @@ stackLikeInputsWithBogusFields =
   [EventObjectStart, EventObjectKey "wibble"] <> stackLikeInputs <>
   [ EventObjectKey "x"
   , EventArrayStart
-  , EventScalar "1"
+  , EventScalar (ScientificScalar 1)
   , EventObjectStart
   , EventObjectKey "location"
-  , EventScalar "666"
+  , EventScalar (ScientificScalar 666)
   , EventObjectEnd
   , EventArrayEnd
   , EventObjectKey "y"
-  , EventScalar "2"
+  , EventScalar (ScientificScalar 2)
   , EventObjectEnd
   ]
 
@@ -224,14 +226,14 @@ stackLikeInputs =
   [ EventObjectStart
   , EventObjectKey "x"
   , EventArrayStart
-  , EventScalar "1"
+  , EventScalar (ScientificScalar 1)
   , EventObjectStart
   , EventObjectKey "location"
-  , EventScalar "666"
+  , EventScalar (ScientificScalar 666)
   , EventObjectEnd
   , EventArrayEnd
   , EventObjectKey "y"
-  , EventScalar "2"
+  , EventScalar (ScientificScalar 2)
   , EventObjectEnd
   ]
 
@@ -243,7 +245,17 @@ stackLikeGrammar = Object ((,) <$> yfield <*> (xfield <> zfield))
     xarray = Array (fmap Left int <> fmap Right loc)
     zfield = fmap (pure . Left) (Field "z" int)
     loc = Object (Field "location" int)
-    int = Scalar (first T.pack . readEither . S8.unpack)
+    int = intScalar
 
-variablesGrammar :: ValueParser () m [ByteString]
+variablesGrammar :: ValueParser () m [Scalar]
 variablesGrammar = Array (Scalar pure)
+
+intScalar :: (Bounded i, Integral i) => ValueParser Text m i
+intScalar =
+  Scalar
+    (\case
+       ScientificScalar s ->
+         case toBoundedInteger s of
+           Nothing -> Left "Invalid bounded integer."
+           Just v -> pure v
+       _ -> Left "Expected integer.")
