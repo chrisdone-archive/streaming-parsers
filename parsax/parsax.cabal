@@ -36,7 +36,8 @@ library
                        validation,
                        attoparsec,
                        conduit-extra,
-                       scientific
+                       scientific,
+                       syb
   default-language:    Haskell2010
 
 test-suite parsax-test
