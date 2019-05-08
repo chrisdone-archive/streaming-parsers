@@ -3,5 +3,9 @@
 1, { "location": 666 }
 ],
 "y": 2,
-"z": 3
+"z": 3,
+"extraneous": null,
+"extraneous1": true,
+"extraneous2": false,
+"extraneous3": "wibble"
 }

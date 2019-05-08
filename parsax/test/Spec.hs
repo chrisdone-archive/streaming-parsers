@@ -173,13 +173,23 @@ spec = do
           "From file"
           (shouldReturn
              (parseJsonFile stackLikeGrammar "test/assets/stack.json")
-             (stackLikeResultJson, mempty))
+             ( stackLikeResultJson
+             , [ IgnoredKey "extraneous"
+               , IgnoredKey "extraneous1"
+               , IgnoredKey "extraneous2"
+               , IgnoredKey "extraneous3"
+               ]))
         it
           "From string"
           (shouldReturn
              (do bytes <- S.readFile "test/assets/stack.json"
                  parseJsonByteString stackLikeGrammar bytes)
-             (stackLikeResultJson, mempty))
+             ( stackLikeResultJson
+             , [ IgnoredKey "extraneous"
+               , IgnoredKey "extraneous1"
+               , IgnoredKey "extraneous2"
+               , IgnoredKey "extraneous3"
+               ]))
         it
           "Empty"
           (shouldReturn
