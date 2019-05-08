@@ -5,22 +5,19 @@
 
 import           Control.Monad.ST
 import           Data.Bifunctor
-import           Data.ByteString (ByteString)
 import qualified Data.ByteString as S
-import qualified Data.ByteString.Char8 as S8
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.Foldable
 import           Data.Parsax
+import           Data.Parsax.Json
 import           Data.Parsax.Yaml
 import           Data.Reparsec
 import           Data.Scientific
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import           Data.Text (Text)
-import qualified Data.Text as T
 import           Test.Hspec
-import           Text.Read
 
 main :: IO ()
 main = hspec spec
@@ -72,8 +69,7 @@ spec = do
                 "Value user parse error"
                 (shouldBe
                    (parseOnly
-                      (valueReparsec
-                         intScalar)
+                      (valueReparsec intScalar)
                       [EventScalar (TextScalar "a")])
                    (Left (UserError "Expected integer.") :: Either (ParseError Text) Int)))
         describe
@@ -83,17 +79,21 @@ spec = do
                 (shouldBe
                    (parseOnly
                       (valueReparsec (Array (Scalar (const (pure 1)))))
-                      [EventArrayStart, EventScalar (TextScalar "1"), EventArrayEnd])
+                      [ EventArrayStart
+                      , EventScalar (TextScalar "1")
+                      , EventArrayEnd
+                      ])
                    (Right [1 :: Int]))
               it
                 "Array error"
                 (shouldBe
                    (parseOnly
                       (valueReparsec
-                         (Array
-                            (intScalar <>
-                             Scalar (const (Left "")))))
-                      [EventArrayStart, EventScalar (TextScalar "a"), EventArrayEnd])
+                         (Array (intScalar <> Scalar (const (Left "")))))
+                      [ EventArrayStart
+                      , EventScalar (TextScalar "a")
+                      , EventArrayEnd
+                      ])
                    (Left (UnexpectedEvent (EventScalar (TextScalar "a"))) :: Either (ParseError Text) [Int])))
         describe
           "Object"
@@ -156,7 +156,9 @@ spec = do
                 (shouldReturn
                    (parseYamlFile variablesGrammar "test/assets/variables.yaml")
                    ( Right
-                       (map TextScalar ["Apple", "Beachball", "Cartoon", "Duckface", "Apple"])
+                       (map
+                          TextScalar
+                          ["Apple", "Beachball", "Cartoon", "Duckface", "Apple"])
                    , mempty))
               it
                 "Object sized"
@@ -165,6 +167,32 @@ spec = do
                       stackLikeGrammar
                       "test/assets/stack-variables.yaml")
                    (stackLikeResultVars, mempty))))
+  describe
+    "Json"
+    (do it
+          "From file"
+          (shouldReturn
+             (parseJsonFile stackLikeGrammar "test/assets/stack.json")
+             (stackLikeResultJson, mempty))
+        it
+          "From string"
+          (shouldReturn
+             (do bytes <- S.readFile "test/assets/stack.json"
+                 parseJsonByteString stackLikeGrammar bytes)
+             (stackLikeResultJson, mempty))
+        it
+          "Empty"
+          (shouldReturn
+             (parseJsonByteString (Array (Scalar pure)) "")
+             ( Left
+                 ((TokenizeError
+                     (AttoParseError
+                        { errorContexts = []
+                        , errorMessage = "not enough input"
+                        , errorPosition =
+                            Position {posLine = 1, posCol = 1, posOffset = 0}
+                        })) :: JsonError ())
+             , mempty)))
   where
     parsePeacemeal ::
          (forall s. ParserT (Seq Event) (ParseError Text) (ST s) a)
@@ -190,6 +218,9 @@ spec = do
 
 --------------------------------------------------------------------------------
 -- stack.yaml-like test data
+
+stackLikeResultJson :: Either (JsonError e) (Int, [Either Int Int])
+stackLikeResultJson = first ParsaxError stackLikeResult
 
 stackLikeResult :: Either (ParseError e) (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
