@@ -20,3 +20,4 @@ Streaming parsers for file formats like JSON and YAML
 |Supplying extra limits (array length, etc.)| - | Easy |
 |Get code coverage to near 100%| - | Detailed |
 |Memory/allocation tests| - | Fairly straight-forward |
+|Deal with duplicate keys| - | TBD |
