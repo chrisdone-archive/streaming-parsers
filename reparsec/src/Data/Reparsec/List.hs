@@ -49,18 +49,6 @@ nextElement =
         in go mi0 more0)
 {-# INLINABLE nextElement #-}
 
--- -- | Expect the end of input.
--- endOfInput :: (ExpectedEndOfInput e, Monad m) => ParserT [a] e m ()
--- endOfInput =
---   ParserT (\mi0 done failed ->
---        let go mi =
---              case mi of
---                Just [] -> pure (Partial go)
---                Just (_:_) -> failed mi expectedEndOfInputError
---                Nothing -> done Nothing ()
---         in go mi0)
--- {-# INLINABLE endOfInput #-}
-
 -- | Try to extract the next element from the input.
 zeroOrMore :: (Semigroup e, Monad m) => ParserT [t] e m b -> ParserT [t] e m [b]
 zeroOrMore elementParser = do
