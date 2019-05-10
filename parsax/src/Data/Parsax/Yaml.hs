@@ -92,7 +92,7 @@ value = do
         Libyaml.EventScalar !bs !tag !style !manchor ->
           bind
             manchor
-            (let !text = T.decodeUtf8With T.lenientDecode bs
+            (let !text = T.decodeUtf8With T.lenientDecode bs -- TODO: replace with the strict decodeUtf8'
               in yield (EventScalar (textToValue style tag text)))
         Libyaml.EventSequenceStart !_tag !_sequencestyle !manchor ->
           bind manchor array
@@ -152,7 +152,7 @@ object = do
                       error
                         "Alias yielded wrong event for this position: expected key or end-of-object."
             Libyaml.EventScalar !bs !_tag !_style !mkeyanchor -> do
-              bind mkeyanchor (yield (EventObjectKey (T.decodeUtf8 bs)))
+              bind mkeyanchor (yield (EventObjectKey (T.decodeUtf8 bs))) -- TODO: fix this partial
               value
               go
             _ -> error "Expected key or end of object."

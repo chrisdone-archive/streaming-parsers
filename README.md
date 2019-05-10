@@ -21,3 +21,4 @@ Streaming parsers for file formats like JSON and YAML
 |Get code coverage to near 100%| - | Detailed |
 |Memory/allocation tests| - | Fairly straight-forward |
 |Deal with duplicate keys| - | TBD |
+|Deal with utf8 strictly| - | TBD |
