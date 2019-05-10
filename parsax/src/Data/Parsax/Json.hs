@@ -50,7 +50,7 @@ import           Data.Text (Text)
 
 data JsonError e
   = TokenizeError !AttoParseError
-  | ParsaxError (ParseError e)
+  | ParseError (ParseError e)
   deriving (Eq, Show)
 
 -- | The context and message from a 'A.Fail' value.
@@ -90,7 +90,7 @@ parseJsonFile valueParser filePath =
     sink = do
       (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink valueParser)
       case tokenizeResult of
-        Right () -> pure (first (first ParsaxError) parseResult)
+        Right () -> pure (first (first ParseError) parseResult)
         Left err -> pure (Left err, mempty)
 
 parseJsonByteString ::
@@ -103,7 +103,7 @@ parseJsonByteString valueParser byteString =
     sink = do
       (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink valueParser)
       case tokenizeResult of
-        Right () -> pure (first (first ParsaxError) parseResult)
+        Right () -> pure (first (first ParseError) parseResult)
         Left err -> pure (Left err, mempty)
 
 jsonSink :: Monad m => ConduitT ByteString Event m (Either (JsonError e) ())

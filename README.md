@@ -36,3 +36,8 @@ failed to parse field 'github': key "github" not present
 Warning: /home/chris/Work/fpco/streaming-parsers/stack.yaml:
 Unrecognized field in PLRepo: extra-dep
 ```
+
+``` haskell
+Warning: /home/chris/Work/fpco/streaming-parsers/stack.yaml:
+Unrecognized field in PLArchive:github: extra-dep
+```

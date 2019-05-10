@@ -137,18 +137,18 @@ spec = do
           "From file"
           (shouldReturn
              (parseYamlFile stackLikeGrammar "test/assets/stack.yaml")
-             (stackLikeResult, mempty))
+             (stackLikeResultYaml, mempty))
         it
           "From string"
           (shouldReturn
              (do bytes <- S.readFile "test/assets/stack.yaml"
                  parseYamlByteString stackLikeGrammar bytes)
-             (stackLikeResult, mempty))
+             (stackLikeResultYaml, mempty))
         it
           "Empty"
           (shouldReturn
              (parseYamlByteString (Array (Scalar pure)) "")
-             (Left (EmptyDocument :: ParseError ()), mempty))
+             (Left (Data.Parsax.Yaml.ParseError (EmptyDocument :: ParseError ())), mempty))
         describe
           "Variables"
           (do it
@@ -166,7 +166,7 @@ spec = do
                    (parseYamlFile
                       stackLikeGrammar
                       "test/assets/stack-variables.yaml")
-                   (stackLikeResultVars, mempty))))
+                   (stackLikeResultVarsYaml, mempty))))
   describe
     "Json"
     (do it
@@ -230,10 +230,16 @@ spec = do
 -- stack.yaml-like test data
 
 stackLikeResultJson :: Either (JsonError e) (Int, [Either Int Int])
-stackLikeResultJson = first ParsaxError stackLikeResult
+stackLikeResultJson = first Data.Parsax.Json.ParseError stackLikeResult
 
 stackLikeResult :: Either (ParseError e) (Int, [Either Int Int])
 stackLikeResult = (Right (2 :: Int, [Left (1 :: Int), Right (666 :: Int)]))
+
+stackLikeResultYaml :: Either (YamlError e) (Int, [Either Int Int])
+stackLikeResultYaml = first Data.Parsax.Yaml.ParseError stackLikeResult
+
+stackLikeResultVarsYaml :: Either (YamlError e) (Int, [Either Int Int])
+stackLikeResultVarsYaml = first Data.Parsax.Yaml.ParseError stackLikeResultVars
 
 stackLikeResultVars :: Either (ParseError e) (Int, [Either Int Int])
 stackLikeResultVars =
