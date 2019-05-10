@@ -18,8 +18,8 @@ Streaming parsers for file formats like JSON and YAML
 |Documentation generator| :heavy_check_mark: | Straight-forward |
 |Deal with utf8 strictly|  :heavy_check_mark: | Straight-forward |
 |Deal with duplicate keys| :heavy_check_mark: | Straight-forward |
+|Supplying extra limits (array length, etc.)| :heavy_check_mark: | Easy |
 |Include line/col info in errors| - | Fairly easy |
-|Supplying extra limits (array length, etc.)| - | Easy |
 |Get code coverage to near 100%| - | Detailed |
 |Memory/allocation tests| - | Fairly straight-forward |
 
