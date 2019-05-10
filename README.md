@@ -16,7 +16,7 @@ Streaming parsers for file formats like JSON and YAML
 |YAML backend| :heavy_check_mark: | Straight-forward |
 |JSON backend| :heavy_check_mark: |Fairly straight-forward|
 |Documentation generator| :heavy_check_mark: | Straight-forward |
-|Deal with utf8 strictly| - | :heavy_check_mark: |
+|Deal with utf8 strictly|  :heavy_check_mark: | Straight-forward |
 |Include line/col info in errors| - | Fairly easy |
 |Supplying extra limits (array length, etc.)| - | Easy |
 |Get code coverage to near 100%| - | Detailed |
