@@ -29,6 +29,7 @@ import           Data.Functor
 import           Data.Parsax
 import           Data.Sequence (Seq)
 import           Data.Text (Text)
+import           Prelude hiding (error, undefined)
 
 -- Copied from aeson
 
@@ -51,6 +52,9 @@ import           Data.Text (Text)
 data JsonError e
   = TokenizeError !AttoParseError
   | ParseError (ParseError e)
+  | ExtraneousComma
+  | MisplacedComma
+  | DoubleStart
   deriving (Eq, Show)
 
 -- | The context and message from a 'A.Fail' value.
@@ -128,20 +132,20 @@ jsonSink = go
                         case v of
                           ArrayDone ->
                             case previous of
-                              ArrayComma -> error "Extraneous comma"
+                              ArrayComma -> pure (Left ExtraneousComma)
                               _ -> do
                                 yield EventArrayEnd
                                 pure (Right ())
                           ArrayComma ->
                             case previous of
                               ArrayElement {} -> loop v
-                              _ -> error "Misplaced comma"
+                              _ -> pure (Left MisplacedComma)
                           ArrayElement -> do
                             re <- go
                             case re of
                               Right () -> loop v
                               Left {} -> pure re
-                          ArrayStart -> error ""
+                          ArrayStart -> pure (Left DoubleStart)
               loop ArrayStart
             ValueObjectStart -> do
               yield EventObjectStart
@@ -153,21 +157,21 @@ jsonSink = go
                         case v of
                           ObjectDone ->
                             case previous of
-                              ObjectComma -> error "Extraneous comma"
+                              ObjectComma -> pure (Left ExtraneousComma)
                               _ -> do
                                 yield EventObjectEnd
                                 pure (Right ())
                           ObjectComma ->
                             case previous of
                               ObjectKey {} -> loop v
-                              _ -> error "Misplaced comma"
+                              _ -> pure (Left MisplacedComma)
                           ObjectKey key -> do
                             yield (EventObjectKey key)
                             re <- go
                             case re of
                               Right () -> loop v
                               Left {} -> pure re
-                          ObjectStart -> error ""
+                          ObjectStart -> pure (Left DoubleStart)
               loop ObjectStart
 
 data ArrayToken = ArrayStart | ArrayDone | ArrayComma | ArrayElement

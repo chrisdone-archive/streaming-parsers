@@ -15,6 +15,7 @@ module Data.Parsax.Yaml
   , YamlError(..)
   ) where
 
+import           Prelude hiding (error, undefined)
 import           Control.Applicative
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans
@@ -42,6 +43,11 @@ import qualified Text.Libyaml as Libyaml
 data YamlError e
   = Utf8DecodeError !UnicodeException
   | ParseError !(ParseError e)
+  | NoSuchAnchor !String
+  | UnexpectedEnd
+  | InvalidKeyAnchor
+  | ExpectedKeyOrEndOfObject
+  | DuplicateAnchor !String
   deriving (Eq, Show)
 
 -- | Parse from a file.
@@ -78,11 +84,17 @@ yamlEventSource bs = Libyaml.decodeMarked bs .| eventConduit
 yamlEventFileSource :: (MonadResource m, MonadIO m) => FilePath -> ConduitM i Event m (Either (YamlError e) ())
 yamlEventFileSource fp = Libyaml.decodeFileMarked fp .| eventConduit
 
+-- | Environment for parsing.
+data Env =
+  Env
+    { envAnchors :: !(IORef (Map Libyaml.AnchorName [Event]))
+    }
+
 -- | Convert YAML events to Parsax events.
 eventConduit :: MonadIO m => ConduitT Libyaml.MarkedEvent Event m (Either (YamlError e) ())
 eventConduit = do
   ref <- liftIO (newIORef mempty)
-  transPipe (\m -> runReaderT m ref) value
+  transPipe (\m -> runReaderT m (Env ref)) value
 
 --------------------------------------------------------------------------------
 -- YAML conduits
@@ -90,7 +102,7 @@ eventConduit = do
 -- | A YAML value.
 value ::
      MonadIO m
-  => ConduitT Libyaml.MarkedEvent Event (ReaderT (IORef (Map Libyaml.AnchorName [Event])) m) (Either (YamlError e) ())
+  => ConduitT Libyaml.MarkedEvent Event (ReaderT Env m) (Either (YamlError e) ())
 value = do
   mevent <- await
   case mevent of
@@ -104,27 +116,29 @@ value = do
         Libyaml.EventAlias anchorName -> do
           result <- lookupAnchor anchorName
           case result of
-            Nothing -> error ("No such anchor " ++ show anchorName)
-            Just events -> do mapM_ yield events
-                              pure (Right ())
+            Nothing -> pure (Left (NoSuchAnchor anchorName))
+            Just events -> do
+              mapM_ yield events
+              pure (Right ())
         Libyaml.EventScalar !bs !tag !style !manchor ->
           bind
             manchor
             (case T.decodeUtf8' bs of
                Left err -> pure (Left (Utf8DecodeError err))
-               Right text -> do yield (EventScalar (textToValue style tag text))
-                                pure (Right ()))
+               Right text -> do
+                 yield (EventScalar (textToValue style tag text))
+                 pure (Right ()))
         Libyaml.EventSequenceStart !_tag !_sequencestyle !manchor ->
           bind manchor array
         Libyaml.EventMappingStart !_tag !_mappingstyle !manchor ->
           bind manchor object
-        Libyaml.EventSequenceEnd -> error "Unexpected mapping end."
-        Libyaml.EventMappingEnd -> error "Unexpected mapping end."
+        Libyaml.EventSequenceEnd -> pure (Left UnexpectedEnd)
+        Libyaml.EventMappingEnd -> pure (Left UnexpectedEnd)
 
 -- | A YAML array.
 array ::
      MonadIO m
-  => ConduitT Libyaml.MarkedEvent Event (ReaderT (IORef (Map Libyaml.AnchorName [Event])) m) (Either (YamlError e) ())
+  => ConduitT Libyaml.MarkedEvent Event (ReaderT Env m) (Either (YamlError e) ())
 array = do
   yield EventArrayStart
   go
@@ -132,7 +146,7 @@ array = do
     go = do
       mev <- await
       case mev of
-        Nothing -> error "Expected end of sequence."
+        Nothing -> pure (Left UnexpectedEnd)
         Just marked@Libyaml.MarkedEvent {yamlEvent = ev} ->
           case ev of
             Libyaml.EventSequenceEnd -> do
@@ -148,7 +162,7 @@ array = do
 -- | A YAML object.
 object ::
      MonadIO m
-  => ConduitT Libyaml.MarkedEvent Event (ReaderT (IORef (Map Libyaml.AnchorName [Event])) m) (Either (YamlError e) ())
+  => ConduitT Libyaml.MarkedEvent Event (ReaderT Env m) (Either (YamlError e) ())
 object = do
   yield EventObjectStart
   go
@@ -156,7 +170,7 @@ object = do
     go = do
       mev <- await
       case mev of
-        Nothing -> error "Expected end of mapping."
+        Nothing -> pure (Left UnexpectedEnd)
         Just Libyaml.MarkedEvent {yamlEvent = ev} ->
           case ev of
             Libyaml.EventMappingEnd -> do
@@ -165,28 +179,33 @@ object = do
             Libyaml.EventAlias anchorName -> do
               result <- lookupAnchor anchorName
               case result of
-                Nothing -> error "Anchor name not in scope!"
+                Nothing -> pure (Left (NoSuchAnchor anchorName))
                 Just events ->
                   case events of
                     [eventObjectKey@EventObjectKey {}] -> do
                       yield eventObjectKey
                       res <- value
                       case res of
-                        Left{} -> pure res
-                        Right{} -> go
-                    _ ->
-                      error
-                        "Alias yielded wrong event for this position: expected key or end-of-object."
+                        Left {} -> pure res
+                        Right {} -> go
+                    _ -> pure (Left InvalidKeyAnchor)
             Libyaml.EventScalar !bs !_tag !_style !mkeyanchor -> do
               case T.decodeUtf8' bs of
                 Left err -> pure (Left (Utf8DecodeError err))
                 Right text -> do
-                  bind mkeyanchor (yield (EventObjectKey text)) -- TODO: fix this partial
-                  result <- value
+                  result <-
+                    bind
+                      mkeyanchor
+                      (do yield (EventObjectKey text)
+                          pure (Right ()))
                   case result of
-                    Left{} -> pure result
-                    Right{} -> go
-            _ -> error "Expected key or end of object."
+                    Left {} -> pure result
+                    Right () -> do
+                      res <- value
+                      case res of
+                        Left {} -> pure res
+                        Right {} -> go
+            _ -> pure (Left ExpectedKeyOrEndOfObject)
 
 --------------------------------------------------------------------------------
 -- Anchor utilities
@@ -194,31 +213,33 @@ object = do
 -- | If there's a variable to lookupAnchor, lookupAnchor all the events to that variable.
 lookupAnchor ::
      (MonadIO m
-     ,f ~ ReaderT (IORef (Map Libyaml.AnchorName [o])) m)
+     ,f ~ ReaderT Env m)
   => Libyaml.AnchorName
-  -> ConduitT i o f (Maybe [o])
+  -> ConduitT i Event f (Maybe [Event])
 lookupAnchor var = do
-  ref <- lift ask
+  env <- lift ask
+  let ref = envAnchors env
   mp <- liftIO (readIORef ref)
   pure (M.lookup var mp)
 
 -- | If there's a variable to bind, bind all the events to that variable.
 bind ::
      (MonadIO m
-     ,f ~ ReaderT (IORef (Map Libyaml.AnchorName [o])) m)
+     ,f ~ ReaderT Env m)
   => Maybe Libyaml.AnchorName
-  -> ConduitT i o f a
-  -> ConduitT i o f a
+  -> ConduitT i Event f (Either (YamlError e) a)
+  -> ConduitT i Event f (Either (YamlError e) a)
 bind Nothing src = src
 bind (Just var) src = do
   (a, events) <- record src
-  ref <- lift ask
+  env <- lift ask
+  let ref = envAnchors env
   mp <- liftIO (readIORef ref)
   case M.lookup var mp of
-    Nothing -> pure ()
-    Just {} -> error "Warn about duplicate keys here."
-  liftIO (modifyIORef ref (M.insert var events))
-  pure a
+    Nothing -> do
+      liftIO (modifyIORef ref (M.insert var events))
+      pure a
+    Just {} -> pure (Left (DuplicateAnchor var))
 
 --------------------------------------------------------------------------------
 -- Conduit utilities
