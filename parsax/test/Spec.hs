@@ -78,7 +78,7 @@ spec = do
                 "Array"
                 (shouldBe
                    (parseOnly
-                      (valueReparsec (Array (Scalar (const (pure 1)))))
+                      (valueReparsec (Array 1 (Scalar (const (pure 1)))))
                       [ EventArrayStart
                       , EventScalar (TextScalar "1")
                       , EventArrayEnd
@@ -89,7 +89,7 @@ spec = do
                 (shouldBe
                    (parseOnly
                       (valueReparsec
-                         (Array (intScalar <> Scalar (const (Left "")))))
+                         (Array 1 (intScalar <> Scalar (const (Left "")))))
                       [ EventArrayStart
                       , EventScalar (TextScalar "a")
                       , EventArrayEnd
@@ -166,7 +166,7 @@ spec = do
         it
           "Empty"
           (shouldReturn
-             (parseYamlByteString (Array (Scalar pure)) "")
+             (parseYamlByteString (Array 1 (Scalar pure)) "")
              ( Left
                  (Data.Parsax.Yaml.ParseError (EmptyDocument :: ParseError ()))
              , mempty))
@@ -214,7 +214,7 @@ spec = do
         it
           "Empty"
           (shouldReturn
-             (parseJsonByteString (Array (Scalar pure)) "")
+             (parseJsonByteString (Array 1 (Scalar pure)) "")
              ( Left
                  ((TokenizeError
                      (AttoParseError
@@ -328,13 +328,13 @@ stackLikeGrammar = Object ((,) <$> yfield <*> (xfield <> zfield))
   where
     yfield = Field "y" int
     xfield = Field "x" xarray
-    xarray = Array (fmap Left int <> fmap Right loc)
+    xarray = Array 10 (fmap Left int <> fmap Right loc)
     zfield = fmap (pure . Left) (Field "z" int)
     loc = Object (Field "location" int)
     int = intScalar
 
 variablesGrammar :: ValueParser () m [Scalar]
-variablesGrammar = Array (Scalar pure)
+variablesGrammar = Array 10 (Scalar pure)
 
 intScalar :: (Bounded i, Integral i) => ValueParser Text m i
 intScalar =

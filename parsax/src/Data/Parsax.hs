@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE BangPatterns #-}
@@ -42,6 +43,7 @@ import qualified Data.Map.Strict as M
 import           Data.Reparsec
 import           Data.Reparsec.Sequence
 import           Data.Scientific
+import           Data.Semigroup
 import           Data.Semigroup.Foldable
 import           Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
@@ -122,7 +124,7 @@ instance Semigroup (ObjectParser e m a) where
 data ValueParser e m a where
   Scalar :: (Scalar -> Either e a) -> ValueParser e m a
   Object :: ObjectParser e m a -> ValueParser e m a
-  Array :: ValueParser e m a -> ValueParser e m [a]
+  Array :: Int -> ValueParser e m a -> ValueParser e m [a]
   FMapValue :: (x -> a) -> ValueParser e m x -> ValueParser e m a
   AltValue :: NonEmpty (ValueParser e m a) -> ValueParser e m a
   PureValue :: a -> ValueParser e m a
@@ -171,11 +173,11 @@ valueReparsec =
       case result of
         Failure err -> failWith err
         Success a -> pure a
-    Array valueParser ->
+    Array limit valueParser ->
       around
         EventArrayStart
         EventArrayEnd
-        (zeroOrMore (valueReparsec valueParser))
+        (zeroOrMoreUpTo limit (valueReparsec valueParser))
     Scalar parse -> do
       event <- nextElement
       case event of
@@ -319,6 +321,7 @@ data SchemaError
   | SchemaExpectedArrayOrObject !Event
   | SchemaUnterminatedObject
   | SchemaUnterminatedArray
+  | SchemaTooManyArrayElements !Int
   | SchemaArrayNotAllowed
   | SchemaObjectNotAllowed
   | SchemaDuplicateKey !Text
@@ -329,7 +332,7 @@ data Schema =
   Schema
     { schemaScalar :: Bool
     , schemaObject :: Maybe (Map Text Schema)
-    , schemaArray :: Maybe Schema
+    , schemaArray :: Maybe (Schema, Max Int)
     }
 
 instance Semigroup Schema where
@@ -356,7 +359,7 @@ valueParserSchema =
   \case
     Scalar {} -> mempty {schemaScalar = True}
     Object objectParser -> mempty {schemaObject = Just (objectParserSchema objectParser)}
-    Array valueParser -> mempty { schemaArray = Just (valueParserSchema valueParser)}
+    Array limit valueParser -> mempty { schemaArray = Just (valueParserSchema valueParser, Max limit)}
     FMapValue _ v -> valueParserSchema v
     PureValue {} -> mempty
     AltValue choices -> foldMap valueParserSchema (NE.toList choices)
@@ -410,12 +413,12 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
                           Nothing -> lift (modify' (:|> IgnoredKey key))
                           Just {} -> pure ()
                         if Set.member key seen
-                           then pure (SchemaError (SchemaDuplicateKey key))
-                           else do result <- go lookupResult
-                                   case result of
-                                     SchemaOK -> loop (Set.insert key seen)
-                                     SchemaError err -> pure (SchemaError err)
-
+                          then pure (SchemaError (SchemaDuplicateKey key))
+                          else do
+                            result <- go lookupResult
+                            case result of
+                              SchemaOK -> loop (Set.insert key seen)
+                              SchemaError err -> pure (SchemaError err)
                       Just e ->
                         pure (SchemaError (SchemaWrongEventInObjectContext e))
                       Nothing -> pure (SchemaError SchemaUnterminatedObject)
@@ -438,9 +441,9 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
         Just ev@EventArrayStart ->
           case fmap schemaArray mschema of
             Just Nothing -> pure (SchemaError SchemaArrayNotAllowed)
-            Just (Just schema) -> do
+            Just (Just (schema, maxElements)) -> do
               yield ev
-              let loop = do
+              let loop remaining = do
                     mnext1 <- await
                     case mnext1 of
                       Nothing -> pure (SchemaError SchemaUnterminatedArray)
@@ -448,12 +451,17 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
                         yield e
                         pure SchemaOK
                       Just next -> do
-                        leftover next
-                        result <- go (Just schema)
-                        case result of
-                          SchemaOK -> loop
-                          SchemaError err -> pure (SchemaError err)
-               in loop
+                        if remaining <= 0
+                          then pure
+                                 (SchemaError
+                                    (SchemaTooManyArrayElements (getMax maxElements)))
+                          else do
+                            leftover next
+                            result <- go (Just schema)
+                            case result of
+                              SchemaOK -> loop (remaining - 1)
+                              SchemaError err -> pure (SchemaError err)
+              loop (getMax maxElements)
             Nothing ->
               let loop = do
                     mnext1 <- await

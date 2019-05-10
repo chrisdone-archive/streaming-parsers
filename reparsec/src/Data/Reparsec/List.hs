@@ -3,10 +3,9 @@
 
 module Data.Reparsec.List
   ( nextElement
-  -- , endOfInput
   , expect
   , around
-  , zeroOrMore
+  , zeroOrMoreUpTo
   ) where
 
 import Data.Reparsec
@@ -50,10 +49,13 @@ nextElement =
 {-# INLINABLE nextElement #-}
 
 -- | Try to extract the next element from the input.
-zeroOrMore :: (Semigroup e, Monad m) => ParserT [t] e m b -> ParserT [t] e m [b]
-zeroOrMore elementParser = do
-  result <- fmap Just elementParser <> pure Nothing
-  case result of
-    Nothing -> pure []
-    Just element -> fmap (element :) (zeroOrMore elementParser)
-{-# INLINABLE zeroOrMore #-}
+zeroOrMoreUpTo :: (Semigroup e, Monad m) => Int -> ParserT [a] e m b -> ParserT [a] e m [b]
+zeroOrMoreUpTo maxItems elementParser = go maxItems
+  where
+    go 0 = pure []
+    go itemsLeft = do
+      result <- fmap Just elementParser <> pure Nothing
+      case result of
+        Nothing -> pure []
+        Just element -> fmap (element :) (go (itemsLeft - 1))
+{-# INLINABLE zeroOrMoreUpTo #-}
