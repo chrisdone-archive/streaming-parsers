@@ -24,6 +24,7 @@ module Data.Parsax
   , ValueParser(..)
   , ParseError(..)
   , ParseWarning(..)
+  , SchemaError(..)
   ) where
 
 import qualified Control.Alt.Free as Free
@@ -44,6 +45,7 @@ import           Data.Scientific
 import           Data.Semigroup.Foldable
 import           Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
+import qualified Data.Set as Set
 import           Data.Text (Text)
 import           Data.Validation
 import qualified Data.Vault.ST.Strict as Vault
@@ -319,6 +321,7 @@ data SchemaError
   | SchemaUnterminatedArray
   | SchemaArrayNotAllowed
   | SchemaObjectNotAllowed
+  | SchemaDuplicateKey !Text
   deriving (Show, Eq)
 
 -- | A schema of the shape of data that can be input.
@@ -394,7 +397,7 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
           case fmap schemaObject mschema of
             Just (Just obj) -> do
               yield ev
-              let loop = do
+              let loop seen = do
                     mnext1 <- await
                     case mnext1 of
                       Just e@EventObjectEnd -> do
@@ -406,14 +409,17 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
                         case lookupResult of
                           Nothing -> lift (modify' (:|> IgnoredKey key))
                           Just {} -> pure ()
-                        result <- go lookupResult
-                        case result of
-                          SchemaOK -> loop
-                          SchemaError err -> pure (SchemaError err)
+                        if Set.member key seen
+                           then pure (SchemaError (SchemaDuplicateKey key))
+                           else do result <- go lookupResult
+                                   case result of
+                                     SchemaOK -> loop (Set.insert key seen)
+                                     SchemaError err -> pure (SchemaError err)
+
                       Just e ->
                         pure (SchemaError (SchemaWrongEventInObjectContext e))
                       Nothing -> pure (SchemaError SchemaUnterminatedObject)
-               in loop
+               in loop mempty
             Just Nothing -> pure (SchemaError SchemaObjectNotAllowed)
             Nothing ->
               let loop = do

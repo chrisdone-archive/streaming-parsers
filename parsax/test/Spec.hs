@@ -101,7 +101,26 @@ spec = do
                 "Object"
                 (shouldBe
                    (parseOnly (valueReparsec stackLikeGrammar) stackLikeInputs)
-                   stackLikeResult)))
+                   stackLikeResult)
+              -- Below: Without the schema filtering, we get a less
+              -- helpful error. But it's an error nontheless.
+              it
+                "Object with duplicate keys"
+                (shouldBe
+                   (parseOnly
+                      (valueReparsec stackLikeGrammar)
+                      stackLikeInputsWithDuplicate)
+                   (Left (UnexpectedEvent EventObjectStart)))
+              -- Below: With the schema filtering, we get a good error
+              -- about duplicate keys.
+              it
+                "Object with bogus fields (schema filtered)"
+                (shouldBe
+                   (runST
+                      (runConduit
+                         (CL.sourceList (toList stackLikeInputsWithDuplicate) .|
+                          valueSink stackLikeGrammar)))
+                   (Left (BadSchema (SchemaDuplicateKey "location")), mempty))))
   describe
     "Peacemeal feeding"
     (describe
@@ -148,7 +167,9 @@ spec = do
           "Empty"
           (shouldReturn
              (parseYamlByteString (Array (Scalar pure)) "")
-             (Left (Data.Parsax.Yaml.ParseError (EmptyDocument :: ParseError ())), mempty))
+             ( Left
+                 (Data.Parsax.Yaml.ParseError (EmptyDocument :: ParseError ()))
+             , mempty))
         describe
           "Variables"
           (do it
@@ -277,6 +298,24 @@ stackLikeInputs =
   , EventObjectStart
   , EventObjectKey "location"
   , EventScalar (ScientificScalar 666)
+  , EventObjectEnd
+  , EventArrayEnd
+  , EventObjectKey "y"
+  , EventScalar (ScientificScalar 2)
+  , EventObjectEnd
+  ]
+
+stackLikeInputsWithDuplicate :: Seq Event
+stackLikeInputsWithDuplicate =
+  [ EventObjectStart
+  , EventObjectKey "x"
+  , EventArrayStart
+  , EventScalar (ScientificScalar 1)
+  , EventObjectStart
+  , EventObjectKey "location"
+  , EventScalar (ScientificScalar 666)
+  , EventObjectKey "location"
+  , EventScalar (ScientificScalar 777)
   , EventObjectEnd
   , EventArrayEnd
   , EventObjectKey "y"
