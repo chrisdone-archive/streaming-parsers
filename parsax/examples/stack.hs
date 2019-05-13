@@ -12,6 +12,7 @@ stack runhaskell ./stack.hs
 module Main where
 
 import           Data.Map.Strict (Map)
+import qualified Data.Map.Strict as M
 import           Data.Parsax
 import           Data.Parsax.Yaml
 import           Data.Text (Text)
@@ -65,8 +66,14 @@ configObject =
             "packages"
             (Array maxBound (plainPackageScalar <> locationPackageObject))
         configExtraDeps <- Field "extra-deps" (Array maxBound textScalar)
-        configFlags <- pure mempty
-        pure (Config {configFlags, configResolver, configPackages, configExtraDeps}))
+        configFlags <-
+          Field
+            "flags"
+            (fmap
+               M.fromList
+               (Mapping maxBound (fmap M.fromList (Mapping maxBound boolScalar))))
+        pure
+          (Config {configFlags, configResolver, configPackages, configExtraDeps}))
   where
     plainPackageScalar =
       Scalar
