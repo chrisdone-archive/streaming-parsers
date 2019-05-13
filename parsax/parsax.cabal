@@ -16,6 +16,7 @@ library
   exposed-modules:     Data.Parsax
                        Data.Parsax.Yaml
                        Data.Parsax.Json
+                       Data.Parsax.Yaml.Doc
   other-modules:
     Control.Alt.Free
   build-depends:       base >= 4.7 && < 5,

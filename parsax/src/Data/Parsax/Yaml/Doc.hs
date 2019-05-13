@@ -23,7 +23,7 @@ valueForest =
   \case
     Scalar {} -> [Node "Scalar" []]
     Object obj -> [Node "Object" (sortBy (comparing gdepth) (objectForest obj))]
-    Array x -> [Node "Array" (sortBy (comparing gdepth) (valueForest x))]
+    Array _ x -> [Node "Array" (sortBy (comparing gdepth) (valueForest x))]
     FMapValue _ x -> valueForest x
     AltValue xs ->
       [Node "OneOf" (sortBy (comparing gdepth) (concatMap valueForest xs))]
@@ -52,7 +52,7 @@ stackLikeGrammar = Object ((,) <$> yfield <*> (xfield <> zfield))
   where
     yfield = Field "y" int
     xfield = Field "x" xarray
-    xarray = Array (fmap Left int <> fmap Right loc)
+    xarray = Array 5 (fmap Left int <> fmap Right loc)
     zfield = fmap (pure . Left) (Field "z" int)
     loc = Object (Field "location" int)
     int = intScalar

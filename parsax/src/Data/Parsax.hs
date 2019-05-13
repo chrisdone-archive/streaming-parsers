@@ -36,10 +36,12 @@ import           Control.Monad.State.Strict
 import           Data.Bifunctor
 import           Data.Conduit
 import           Data.Conduit.Lift
+import           Data.Foldable
 import           Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import           Data.Monoid
 import           Data.Reparsec
 import           Data.Reparsec.Sequence
 import           Data.Scientific
@@ -129,6 +131,27 @@ data ValueParser e m a where
   AltValue :: NonEmpty (ValueParser e m a) -> ValueParser e m a
   PureValue :: a -> ValueParser e m a
   CheckValue :: (i -> m (Either e a)) -> ValueParser e m i -> ValueParser e m a
+
+instance Show (ValueParser e m a) where
+  show =
+    \case
+      Scalar {} -> "(Scalar Func)"
+      Object op -> "(Object " ++ show op ++ ")"
+      Array size vp -> "(Array " ++ show size ++ " " ++ show vp ++ ")"
+      FMapValue _f vp -> "(FMapValue Func " ++ show vp ++ ")"
+      AltValue xs -> "(AltValue " ++ show (toList xs) ++ ")"
+      PureValue _a -> "(PureValue Value)"
+      CheckValue _ v -> "(CheckValue Func " ++ show v ++ ")"
+
+instance Show (ObjectParser e m a) where
+  show =
+    \case
+      Field key vp -> "(Field " ++ show key ++ " " ++ show vp ++ ")"
+      FMapObject _f vp -> "(FMapObject Func " ++ show vp ++ ")"
+      LiftA2 _f vp1 vp ->
+        "(LiftA2 Func " ++ show vp1 ++ " " ++ show vp ++ ")"
+      AltObject xs -> "(AltObject " ++ show (toList xs) ++ ")"
+      PureObject _a -> "(PureObject Value)"
 
 instance Functor (ValueParser e m) where
   fmap = FMapValue
@@ -277,6 +300,7 @@ valueSink valueParser = do
     Nothing -> pure (Left EmptyDocument, mempty)
   where
     start = do
+
       (enforceResult, parseResult) <-
         fuseBoth
           (enforceSchema (Just (valueParserSchema valueParser)))
@@ -330,36 +354,45 @@ data SchemaError
 -- | A schema of the shape of data that can be input.
 data Schema =
   Schema
-    { schemaScalar :: Bool
+    { schemaScalar :: Any
     , schemaObject :: Maybe (Map Text Schema)
     , schemaArray :: Maybe (Schema, Max Int)
-    }
+    } deriving (Show)
 
 instance Semigroup Schema where
   (<>) = mappend
 
 instance Monoid Schema where
-  mappend s1 s2 =
-    Schema
-      { schemaScalar = schemaScalar s1 || schemaScalar s2
-      , schemaObject =
-          case (schemaObject s1, schemaObject s2) of
-            (Just o1, Just o2) -> Just (M.unionWith mappend o1 o2)
-            (Just o, Nothing) -> Just o
-            (Nothing, Just o) -> Just o
-            (Nothing, Nothing) -> Nothing
-      , schemaArray = mappend (schemaArray s1) (schemaArray s2)
-      }
+  mappend s1 s2 = result
+    where
+      result =
+        Schema
+          { schemaScalar = schemaScalar s1 <> schemaScalar s2
+          , schemaObject =
+              case (schemaObject s1, schemaObject s2) of
+                (Just o1, Just o2) -> Just (M.unionWith mappend o1 o2)
+                (Just o, Nothing) -> Just o
+                (Nothing, Just o) -> Just o
+                (Nothing, Nothing) -> Nothing
+          , schemaArray =
+              case (schemaArray s1, schemaArray s2) of
+                (Just o1, Just o2) -> Just (mappend o1 o2)
+                (Just o, Nothing) -> Just o
+                (Nothing, Just o) -> Just o
+                (Nothing, Nothing) -> Nothing
+          }
   mempty =
-    Schema {schemaScalar = False, schemaObject = mempty, schemaArray = mempty}
+    Schema {schemaScalar = mempty, schemaObject = mempty, schemaArray = mempty}
 
 -- | Create a schema out of a value parser.
 valueParserSchema :: ValueParser e m a -> Schema
 valueParserSchema =
   \case
-    Scalar {} -> mempty {schemaScalar = True}
-    Object objectParser -> mempty {schemaObject = Just (objectParserSchema objectParser)}
-    Array limit valueParser -> mempty { schemaArray = Just (valueParserSchema valueParser, Max limit)}
+    Scalar {} -> mempty {schemaScalar = Any True}
+    Object objectParser ->
+      mempty {schemaObject = Just (objectParserSchema objectParser)}
+    Array limit valueParser ->
+      mempty {schemaArray = Just (valueParserSchema valueParser, Max limit)}
     FMapValue _ v -> valueParserSchema v
     PureValue {} -> mempty
     AltValue choices -> foldMap valueParserSchema (NE.toList choices)
@@ -377,7 +410,7 @@ objectParserSchema = go
         LiftA2 _ x y -> M.unionWith (<>) (go x) (go y)
         FMapObject _ x -> go x
         PureObject {} -> mempty
-        AltObject choices -> foldMap go choices
+        AltObject choices -> M.unionsWith (<>) (toList (fmap go choices))
 
 -- | Enforce that the input events match the schema expected.
 enforceSchema ::
@@ -391,10 +424,11 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
       case mnext of
         Just event@(EventScalar {}) ->
           case fmap schemaScalar mschema of
-            Just True -> do
+            Just (Any True) -> do
               yield event
               pure SchemaOK
-            Just False -> pure (SchemaError (SchemaUnexpectedScalar event))
+            Just (Any False) ->
+              pure (SchemaError (SchemaUnexpectedScalar event))
             _ -> pure SchemaOK
         Just ev@EventObjectStart {} ->
           case fmap schemaObject mschema of
@@ -454,7 +488,8 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
                         if remaining <= 0
                           then pure
                                  (SchemaError
-                                    (SchemaTooManyArrayElements (getMax maxElements)))
+                                    (SchemaTooManyArrayElements
+                                       (getMax maxElements)))
                           else do
                             leftover next
                             result <- go (Just schema)
