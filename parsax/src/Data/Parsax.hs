@@ -69,6 +69,7 @@ data ParseError e
   | Errors [ParseError e]
   | ExpectedScalarButGot !Event
   | ExpectedObjectKeyOrEndOfObject !Event
+  | ExpectedObjectKey !Event
   | NoSuchKey !Text
   | EmptyDocument
   | BadSchema !SchemaError
@@ -127,6 +128,7 @@ data ValueParser e m a where
   Scalar :: (Scalar -> Either e a) -> ValueParser e m a
   Object :: ObjectParser e m a -> ValueParser e m a
   Array :: Int -> ValueParser e m a -> ValueParser e m [a]
+  Mapping :: Int -> ValueParser e m a -> ValueParser e m [(Text, a)]
   FMapValue :: (x -> a) -> ValueParser e m x -> ValueParser e m a
   AltValue :: NonEmpty (ValueParser e m a) -> ValueParser e m a
   PureValue :: a -> ValueParser e m a
@@ -138,6 +140,7 @@ instance Show (ValueParser e m a) where
       Scalar {} -> "(Scalar Func)"
       Object op -> "(Object " ++ show op ++ ")"
       Array size vp -> "(Array " ++ show size ++ " " ++ show vp ++ ")"
+      Mapping size vp -> "(Mapping " ++ show size ++ " " ++ show vp ++ ")"
       FMapValue _f vp -> "(FMapValue Func " ++ show vp ++ ")"
       AltValue xs -> "(AltValue " ++ show (toList xs) ++ ")"
       PureValue _a -> "(PureValue Value)"
@@ -196,6 +199,18 @@ valueReparsec =
       case result of
         Failure err -> failWith err
         Success a -> pure a
+    Mapping limit valueParser ->
+      around
+        EventObjectStart
+        EventObjectEnd
+        (zeroOrMoreUpTo
+           limit
+           (do event <- nextElement
+               case event of
+                 EventObjectKey key -> do
+                   value <- valueReparsec valueParser
+                   pure (key, value)
+                 _ -> failWith (ExpectedObjectKey event)))
     Array limit valueParser ->
       around
         EventArrayStart
@@ -300,7 +315,6 @@ valueSink valueParser = do
     Nothing -> pure (Left EmptyDocument, mempty)
   where
     start = do
-
       (enforceResult, parseResult) <-
         fuseBoth
           (enforceSchema (Just (valueParserSchema valueParser)))
@@ -349,6 +363,7 @@ data SchemaError
   | SchemaArrayNotAllowed
   | SchemaObjectNotAllowed
   | SchemaDuplicateKey !Text
+  | SchemaMaximumKeys !(Max Int)
   deriving (Show, Eq)
 
 -- | A schema of the shape of data that can be input.
@@ -357,6 +372,7 @@ data Schema =
     { schemaScalar :: Any
     , schemaObject :: Maybe (Map Text Schema)
     , schemaArray :: Maybe (Schema, Max Int)
+    , schemaMapping :: Maybe (Schema, Max Int)
     } deriving (Show)
 
 instance Semigroup Schema where
@@ -380,9 +396,20 @@ instance Monoid Schema where
                 (Just o, Nothing) -> Just o
                 (Nothing, Just o) -> Just o
                 (Nothing, Nothing) -> Nothing
+          , schemaMapping =
+              case (schemaArray s1, schemaMapping s2) of
+                (Just o1, Just o2) -> Just (mappend o1 o2)
+                (Just o, Nothing) -> Just o
+                (Nothing, Just o) -> Just o
+                (Nothing, Nothing) -> Nothing
           }
   mempty =
-    Schema {schemaScalar = mempty, schemaObject = mempty, schemaArray = mempty}
+    Schema
+      { schemaScalar = mempty
+      , schemaObject = mempty
+      , schemaArray = mempty
+      , schemaMapping = mempty
+      }
 
 -- | Create a schema out of a value parser.
 valueParserSchema :: ValueParser e m a -> Schema
@@ -393,6 +420,8 @@ valueParserSchema =
       mempty {schemaObject = Just (objectParserSchema objectParser)}
     Array limit valueParser ->
       mempty {schemaArray = Just (valueParserSchema valueParser, Max limit)}
+    Mapping limit valueParser ->
+      mempty {schemaMapping = Just (valueParserSchema valueParser, Max limit)}
     FMapValue _ v -> valueParserSchema v
     PureValue {} -> mempty
     AltValue choices -> foldMap valueParserSchema (NE.toList choices)
@@ -431,10 +460,14 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
               pure (SchemaError (SchemaUnexpectedScalar event))
             _ -> pure SchemaOK
         Just ev@EventObjectStart {} ->
-          case fmap schemaObject mschema of
-            Just (Just obj) -> do
+          case fmap
+                 (\schema -> (schemaObject schema, schemaMapping schema))
+                 mschema of
+            Just (Nothing, Nothing) -> pure (SchemaError SchemaObjectNotAllowed)
+            Just (mobj, mmap) -> do
               yield ev
-              let loop seen = do
+              let maxKeys = maybe maxBound snd mmap
+              let loop keysSeen = do
                     mnext1 <- await
                     case mnext1 of
                       Just e@EventObjectEnd -> do
@@ -442,22 +475,31 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
                         pure SchemaOK
                       Just e@(EventObjectKey key) -> do
                         yield e
-                        let lookupResult = M.lookup key obj
+                        let objLookupResult = mobj >>= M.lookup key
+                            mapLookupResult = fmap fst mmap
+                            lookupResult =
+                              case (objLookupResult, mapLookupResult) of
+                                (Nothing, Nothing) -> Nothing
+                                (Just a, Nothing) -> Just a
+                                (Nothing, Just a) -> Just a
+                                (Just a, Just b) -> Just (a <> b)
                         case lookupResult of
                           Nothing -> lift (modify' (:|> IgnoredKey key))
                           Just {} -> pure ()
-                        if Set.member key seen
+                        if Set.member key keysSeen
                           then pure (SchemaError (SchemaDuplicateKey key))
-                          else do
-                            result <- go lookupResult
-                            case result of
-                              SchemaOK -> loop (Set.insert key seen)
-                              SchemaError err -> pure (SchemaError err)
+                          else if Set.size keysSeen > getMax maxKeys
+                                 then pure
+                                        (SchemaError (SchemaMaximumKeys maxKeys))
+                                 else do
+                                   result <- go lookupResult
+                                   case result of
+                                     SchemaOK -> loop (Set.insert key keysSeen)
+                                     SchemaError err -> pure (SchemaError err)
                       Just e ->
                         pure (SchemaError (SchemaWrongEventInObjectContext e))
                       Nothing -> pure (SchemaError SchemaUnterminatedObject)
                in loop mempty
-            Just Nothing -> pure (SchemaError SchemaObjectNotAllowed)
             Nothing ->
               let loop = do
                     mnext1 <- await
