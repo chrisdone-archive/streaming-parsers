@@ -12,7 +12,7 @@ Streaming parsers for file formats like JSON and YAML
   streaming fashion, it can explain what it can parse (like
   optparse-applicative), and is written in applicative style.
 
-GO to the `parsax` directory for more explanation.
+Go to the `parsax` directory for more explanation.
 
 ## Milestones
 
