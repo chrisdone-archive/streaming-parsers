@@ -15,9 +15,9 @@ module Data.Parsax.Yaml
   , YamlError(..)
   ) where
 
-import           Prelude hiding (error, undefined)
 import           Control.Applicative
 import           Control.Monad.IO.Class
+import           Control.Monad.Primitive
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
@@ -38,6 +38,7 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Text.Encoding.Error
+import           Prelude hiding (error, undefined)
 import qualified Text.Libyaml as Libyaml
 
 data YamlError e
@@ -52,9 +53,10 @@ data YamlError e
 
 -- | Parse from a file.
 parseYamlFile ::
-     ValueParser e (ResourceT IO) a
+     (MonadUnliftIO m, PrimMonad m)
+  => ValueParser e (ResourceT m) a
   -> FilePath
-  -> IO (Either (YamlError e) a, Seq ParseWarning)
+  -> m (Either (YamlError e) a, Seq ParseWarning)
 parseYamlFile valueParser file =
   runConduitRes
     (do (lexResult, (parseResult, warnings)) <-
@@ -65,9 +67,10 @@ parseYamlFile valueParser file =
 
 -- | Parse from a bytestring.
 parseYamlByteString ::
-     ValueParser e (ResourceT IO) a
+     (MonadUnliftIO m, PrimMonad m)
+  => ValueParser e (ResourceT m) a
   -> ByteString
-  -> IO (Either (YamlError e) a, Seq ParseWarning)
+  -> m (Either (YamlError e) a, Seq ParseWarning)
 parseYamlByteString valueParser byteString =
   runConduitRes
     (do (lexResult, (parseResult, warnings)) <-

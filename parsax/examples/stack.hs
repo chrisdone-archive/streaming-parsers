@@ -1,9 +1,7 @@
-{-
-
-stack runhaskell ./stack.hs
-
--}
-
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
+{-# LANGUAGE ExtendedDefaultRules #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE LambdaCase #-}
@@ -11,15 +9,27 @@ stack runhaskell ./stack.hs
 
 module Main where
 
+import           Control.Monad.Reader
+import           Data.IORef
+import           Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NE
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import           Data.Parsax
 import           Data.Parsax.Yaml
+import           Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import           Data.Text (Text)
+
+default (Text)
 
 data ConfigError
   = InvalidText Scalar
   | InvalidBool Scalar
+  deriving (Show)
+
+data Warning =
+  DuplicatePackages (NonEmpty Text)
   deriving (Show)
 
 data Package =
@@ -51,20 +61,32 @@ data Config =
 
 main :: IO ()
 main = do
-  (result, warnings) <- parseYamlFile configObject "stack-fake.yaml"
-  print configObject
-  putStrLn (show (valueParserSchema configObject))
-  print result
-  print warnings
+  ref <- newIORef mempty
+  (result, warnings) <-
+    runReaderT (parseYamlFile configObject "stack-fake.yaml") ref
+  userwarnings <- readIORef ref
+  print ("User warnings", userwarnings)
+  print ("Warnings", warnings)
+  print ("Result", result)
 
-configObject :: ValueParser ConfigError m Config
+configObject ::
+     (MonadReader (IORef (Seq Warning)) m, MonadIO m)
+  => ValueParser ConfigError m Config
 configObject =
   Object
     (do configResolver <- Field "resolver" textScalar
         configPackages <-
-          Field
-            "packages"
-            (Array maxBound (plainPackageScalar <> locationPackageObject))
+          (Field
+             "packages"
+             (CheckValue
+                (\packages -> do
+                   ref <- ask
+                   liftIO
+                     (modifyIORef
+                        ref
+                        (<> pure (DuplicatePackages (pure "some-directory"))))
+                   pure (Right packages))
+                (Array maxBound (plainPackageScalar <> locationPackageObject))))
         configExtraDeps <- Field "extra-deps" (Array maxBound textScalar)
         configFlags <-
           Field
