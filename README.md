@@ -34,23 +34,3 @@ Go to the `parsax` directory for more explanation.
 |Include line/col info in errors| - | Fairly easy |
 |Get code coverage to near 100%| - | Detailed |
 |Memory/allocation tests| - | Fairly straight-forward |
-
-
-## Motivational examples
-
-From `stack.yaml` and me not remembering its schema:
-
-``` haskell
-Error in $['extra-deps'][1]: failed to parse field 'extra-deps':
-failed to parse field 'github': key "github" not present
-```
-
-``` haskell
-Warning: /home/chris/Work/fpco/streaming-parsers/stack.yaml:
-Unrecognized field in PLRepo: extra-dep
-```
-
-``` haskell
-Warning: /home/chris/Work/fpco/streaming-parsers/stack.yaml:
-Unrecognized field in PLArchive:github: extra-dep
-```
