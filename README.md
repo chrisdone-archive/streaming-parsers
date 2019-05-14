@@ -9,8 +9,9 @@ Streaming parsers for file formats like JSON and YAML
   (like megaparsec). It use used as an auxilliary package for
   `parsax`.
 * `parsax` is the main package that can parse either JSON or YAML in a
-  streaming fashion, it can explain what it can parse (like
-  optparse-applicative), and is written in applicative style.
+  streaming fashion, protects against security attacks, it can explain
+  what it can parse (like optparse-applicative), and is written in
+  applicative style.
 
 Go to the `parsax` directory for more explanation.
 
