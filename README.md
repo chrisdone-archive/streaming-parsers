@@ -35,3 +35,4 @@ Go to the `parsax` directory for more explanation.
 |Include line/col info in errors| - | Fairly easy |
 |Get code coverage to near 100%| - | Detailed |
 |Memory/allocation tests| - | Fairly straight-forward |
+|Update copyright (esp. from aeson, yaml)| - | Easy |
