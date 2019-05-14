@@ -33,7 +33,8 @@ Go to the `parsax` directory for more explanation.
 |Deal with duplicate keys| :heavy_check_mark: | Straight-forward |
 |Supplying extra limits (array length, etc.)| :heavy_check_mark: | Easy |
 |Set hard limit on number of warnings generated| - | Fairly easy |
+|Cleaned up, robust documentation generator| - | Fairly straight-forward |
 |Include line/col info in errors| - | Fairly easy |
 |Get code coverage to near 100%| - | Detailed |
 |Memory/allocation tests| - | Fairly straight-forward |
-|Update copyright (esp. from aeson, yaml)| - | Easy |
+|Update copyright (esp. from aeson, yaml) before publication| - | Easy |
