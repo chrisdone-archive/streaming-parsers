@@ -54,13 +54,14 @@ data YamlError e
 -- | Parse from a file.
 parseYamlFile ::
      (MonadUnliftIO m, PrimMonad m)
-  => ValueParser e (ResourceT m) a
+  => Config
+  -> ValueParser e (ResourceT m) a
   -> FilePath
   -> m (Either (YamlError e) a, Seq ParseWarning)
-parseYamlFile valueParser file =
+parseYamlFile config valueParser file =
   runConduitRes
     (do (lexResult, (parseResult, warnings)) <-
-          fuseBoth (yamlEventFileSource file) (valueSink valueParser)
+          fuseBoth (yamlEventFileSource file) (valueSink config valueParser)
         case lexResult of
           Left err -> pure (Left err, warnings)
           Right () -> pure (first ParseError parseResult, warnings))
@@ -68,13 +69,14 @@ parseYamlFile valueParser file =
 -- | Parse from a bytestring.
 parseYamlByteString ::
      (MonadUnliftIO m, PrimMonad m)
-  => ValueParser e (ResourceT m) a
+  => Config
+  -> ValueParser e (ResourceT m) a
   -> ByteString
   -> m (Either (YamlError e) a, Seq ParseWarning)
-parseYamlByteString valueParser byteString =
+parseYamlByteString config valueParser byteString =
   runConduitRes
     (do (lexResult, (parseResult, warnings)) <-
-          fuseBoth (yamlEventSource byteString) (valueSink valueParser)
+          fuseBoth (yamlEventSource byteString) (valueSink config valueParser)
         case lexResult of
           Left err -> pure (Left err, warnings)
           Right () -> pure (first ParseError parseResult, warnings))

@@ -15,6 +15,8 @@
 
 module Data.Parsax
   ( valueSink
+  , Config(..)
+  , defaultConfig
   , valueReparsec
   , enforceSchema
   , valueParserSchema
@@ -300,13 +302,25 @@ finishObjectSM msm = Free.runAlt go (msmAlts msm)
 --------------------------------------------------------------------------------
 -- Conduits
 
+-- | Config for parsing.
+data Config =
+  Config
+    { configMaxKeyWarnings :: !Int
+      -- ^ Maximum number of warnings to give about ignored keys.
+    }
+
+-- | Reasonable parsing configuration.
+defaultConfig :: Config
+defaultConfig = Config {configMaxKeyWarnings = 10}
+
 -- | Run an object parser on an event stream. Leftovers events that
 -- weren't consumed, in either success or failure case.
 valueSink ::
      PrimMonad m
-  => ValueParser e m a
+  => Config
+  -> ValueParser e m a
   -> ConduitT Event o m (Either (ParseError e) a, Seq ParseWarning)
-valueSink valueParser = do
+valueSink config valueParser = do
   mfirst <- await
   case mfirst of
     Just event -> do
@@ -317,7 +331,7 @@ valueSink valueParser = do
     start = do
       (enforceResult, parseResult) <-
         fuseBoth
-          (enforceSchema (Just (valueParserSchema valueParser)))
+          (enforceSchema config (Just (valueParserSchema valueParser)))
           (loop (parseResultT (valueReparsec valueParser)))
       pure
         (case enforceResult of
@@ -444,9 +458,10 @@ objectParserSchema = go
 -- | Enforce that the input events match the schema expected.
 enforceSchema ::
      Monad m
-  => Maybe Schema
+  => Config
+  -> Maybe Schema
   -> ConduitT Event Event m (SchemaValidation, Seq ParseWarning)
-enforceSchema mschema0 = runStateC mempty (go mschema0)
+enforceSchema config mschema0 = runStateC mempty (go mschema0)
   where
     go mschema = do
       mnext <- await
@@ -484,7 +499,8 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
                                 (Nothing, Just a) -> Just a
                                 (Just a, Just b) -> Just (a <> b)
                         case lookupResult of
-                          Nothing -> lift (modify' (:|> IgnoredKey key))
+                          Nothing ->
+                            lift (modify' (limitedSnoc (IgnoredKey key)))
                           Just {} -> pure ()
                         if Set.member key keysSeen
                           then pure (SchemaError (SchemaDuplicateKey key))
@@ -554,3 +570,7 @@ enforceSchema mschema0 = runStateC mempty (go mschema0)
                in loop
         Just event -> pure (SchemaError (SchemaExpectedArrayOrObject event))
         Nothing -> pure SchemaOK
+    limitedSnoc x xs =
+      if Seq.length xs >= configMaxKeyWarnings config
+        then xs
+        else xs :|> x

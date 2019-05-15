@@ -31,7 +31,8 @@ spec = do
        (do shouldBe
              (runST
                 (runConduit
-                   (CL.sourceList [] .| valueSink (Object (PureObject ())))))
+                   (CL.sourceList [] .|
+                    valueSink defaultConfig (Object (PureObject ())))))
              (Left (EmptyDocument :: ParseError ()), mempty)))
   describe
     "Reparsec"
@@ -119,7 +120,7 @@ spec = do
                    (runST
                       (runConduit
                          (CL.sourceList (toList stackLikeInputsWithDuplicate) .|
-                          valueSink stackLikeGrammar)))
+                          valueSink defaultConfig stackLikeGrammar)))
                    (Left (BadSchema (SchemaDuplicateKey "location")), mempty))))
   describe
     "Peacemeal feeding"
@@ -140,7 +141,7 @@ spec = do
                 (runST
                    (runConduit
                       (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
-                       valueSink stackLikeGrammar)))
+                       valueSink defaultConfig stackLikeGrammar)))
                 (stackLikeResult, pure (IgnoredKey "wibble")))
            it
              "Empty object"
@@ -148,25 +149,28 @@ spec = do
                 (runST
                    (runConduit
                       (CL.sourceList [EventObjectStart, EventObjectEnd] .|
-                       valueSink (Object (pure ())))))
+                       valueSink defaultConfig (Object (pure ())))))
                 (Right () :: Either (ParseError ()) (), mempty))))
   describe
     "Yaml"
     (do it
           "From file"
           (shouldReturn
-             (parseYamlFile stackLikeGrammar "test/assets/stack.yaml")
+             (parseYamlFile
+                defaultConfig
+                stackLikeGrammar
+                "test/assets/stack.yaml")
              (stackLikeResultYaml, mempty))
         it
           "From string"
           (shouldReturn
              (do bytes <- S.readFile "test/assets/stack.yaml"
-                 parseYamlByteString stackLikeGrammar bytes)
+                 parseYamlByteString defaultConfig stackLikeGrammar bytes)
              (stackLikeResultYaml, mempty))
         it
           "Empty"
           (shouldReturn
-             (parseYamlByteString (Array 1 (Scalar pure)) "")
+             (parseYamlByteString defaultConfig (Array 1 (Scalar pure)) "")
              ( Left
                  (Data.Parsax.Yaml.ParseError (EmptyDocument :: ParseError ()))
              , mempty))
@@ -175,7 +179,10 @@ spec = do
           (do it
                 "Simple"
                 (shouldReturn
-                   (parseYamlFile variablesGrammar "test/assets/variables.yaml")
+                   (parseYamlFile
+                      defaultConfig
+                      variablesGrammar
+                      "test/assets/variables.yaml")
                    ( Right
                        (map
                           TextScalar
@@ -185,15 +192,31 @@ spec = do
                 "Object sized"
                 (shouldReturn
                    (parseYamlFile
+                      defaultConfig
                       stackLikeGrammar
                       "test/assets/stack-variables.yaml")
                    (stackLikeResultVarsYaml, mempty))))
   describe
     "Json"
     (do it
+          "From file, limited warnings"
+          (shouldReturn
+             (parseJsonFile
+                defaultConfig {configMaxKeyWarnings = 3}
+                stackLikeGrammar
+                "test/assets/stack.json")
+             ( stackLikeResultJson
+             , [ IgnoredKey "extraneous"
+               , IgnoredKey "extraneous1"
+               , IgnoredKey "extraneous2"
+               ]))
+        it
           "From file"
           (shouldReturn
-             (parseJsonFile stackLikeGrammar "test/assets/stack.json")
+             (parseJsonFile
+                defaultConfig
+                stackLikeGrammar
+                "test/assets/stack.json")
              ( stackLikeResultJson
              , [ IgnoredKey "extraneous"
                , IgnoredKey "extraneous1"
@@ -204,7 +227,7 @@ spec = do
           "From string"
           (shouldReturn
              (do bytes <- S.readFile "test/assets/stack.json"
-                 parseJsonByteString stackLikeGrammar bytes)
+                 parseJsonByteString defaultConfig stackLikeGrammar bytes)
              ( stackLikeResultJson
              , [ IgnoredKey "extraneous"
                , IgnoredKey "extraneous1"
@@ -214,7 +237,7 @@ spec = do
         it
           "Empty"
           (shouldReturn
-             (parseJsonByteString (Array 1 (Scalar pure)) "")
+             (parseJsonByteString defaultConfig (Array 1 (Scalar pure)) "")
              ( Left
                  ((TokenizeError
                      (AttoParseError

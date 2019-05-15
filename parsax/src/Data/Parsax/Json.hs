@@ -85,27 +85,29 @@ data Position = Position
     deriving (Eq, Ord, Show)
 
 parseJsonFile ::
-     ValueParser e (ResourceT IO) a
+     Config
+  -> ValueParser e (ResourceT IO) a
   -> FilePath
   -> IO (Either (JsonError e) a, Seq ParseWarning)
-parseJsonFile valueParser filePath =
+parseJsonFile config valueParser filePath =
   runConduitRes (CB.sourceFile filePath .| sink)
   where
     sink = do
-      (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink valueParser)
+      (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink config valueParser)
       case tokenizeResult of
         Right () -> pure (first (first ParseError) parseResult)
         Left err -> pure (Left err, mempty)
 
 parseJsonByteString ::
-     ValueParser e (ResourceT IO) a
+     Config
+  -> ValueParser e (ResourceT IO) a
   -> ByteString
   -> IO (Either (JsonError e) a, Seq ParseWarning)
-parseJsonByteString valueParser byteString =
+parseJsonByteString config valueParser byteString =
   runConduitRes (yield byteString .| sink)
   where
     sink = do
-      (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink valueParser)
+      (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink config valueParser)
       case tokenizeResult of
         Right () -> pure (first (first ParseError) parseResult)
         Left err -> pure (Left err, mempty)
