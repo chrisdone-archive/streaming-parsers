@@ -17,6 +17,8 @@ import           Data.Scientific
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import           Data.Text (Text)
+import           Data.Text (Text)
+import qualified Data.Text as T
 import           Test.Hspec
 
 main :: IO ()
@@ -154,6 +156,16 @@ spec = do
   describe
     "Yaml"
     (do it
+          "From file, mapping"
+          (shouldReturn
+             (parseYamlFile
+                defaultConfig {configMaxKeyWarnings = 3}
+                (Mapping 5 (Mapping 1 boolScalar))
+                "test/assets/mapping.yaml")
+             ( Right
+                 [("package1", [("f1", True)]), ("package2", [("f2", True)])]
+             , mempty))
+        it
           "From file"
           (shouldReturn
              (parseYamlFile
@@ -368,3 +380,10 @@ intScalar =
            Nothing -> Left "Invalid bounded integer."
            Just v -> pure v
        _ -> Left "Expected integer.")
+
+
+boolScalar =
+  Scalar
+    (\case
+       BoolScalar bool -> pure bool
+       scalar -> Left "Invalid bool")
