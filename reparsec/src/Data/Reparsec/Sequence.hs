@@ -28,7 +28,7 @@ expect a = do
   a' <- nextElement
   if a == a'
     then pure ()
-    else failWith (unexpectedToken a')
+    else failWith (expectedButGot a a')
 
 -- | Try to extract the next element from the input.
 nextElement :: (NoMoreInput e, Monad m) => ParserT (Seq a) e m a

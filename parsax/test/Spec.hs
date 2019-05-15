@@ -167,6 +167,32 @@ conduit =
                        valueSink defaultConfig stackLikeGrammar)))
                 (stackLikeResult, pure (IgnoredKey "wibble")))
            it
+             "Force object error"
+             (shouldBe
+                (runST
+                   (runConduit
+                      (CL.sourceList
+                         [ EventObjectStart
+                         , EventObjectKey "x"
+                         , EventArrayStart
+                         , EventScalar (ScientificScalar 1)
+                         , EventObjectStart
+                         , EventObjectKey "location"
+                         , EventScalar (TextScalar "666")
+                         , EventObjectEnd
+                         , EventArrayEnd
+                         , EventObjectKey "y"
+                         , EventScalar (ScientificScalar 2)
+                         , EventObjectEnd
+                         ] .|
+                       valueSink defaultConfig stackLikeGrammar)))
+                ( Left (ExpectedButGot EventArrayEnd EventObjectStart)
+                , [ LeftoverEvents
+                      [ EventObjectKey "location"
+                      , EventScalar (TextScalar "666")
+                      ]
+                  ]))
+           it
              "Empty object"
              (shouldBe
                 (runST
@@ -250,7 +276,10 @@ reparsec =
                       , EventScalar (TextScalar "a")
                       , EventArrayEnd
                       ])
-                   (Left (UnexpectedEvent (EventScalar (TextScalar "a"))) :: Either (ParseError Text) [Int])))
+                   (Left
+                      (ExpectedButGot
+                         EventArrayEnd
+                         (EventScalar (TextScalar "a"))) :: Either (ParseError Text) [Int])))
         describe
           "Object"
           (do it
@@ -266,7 +295,7 @@ reparsec =
                    (parseOnly
                       (valueReparsec stackLikeGrammar)
                       stackLikeInputsWithDuplicate)
-                   (Left (UnexpectedEvent EventObjectStart)))
+                   (Left (ExpectedButGot EventArrayEnd EventObjectStart)))
                        -- Below: With the schema filtering, we get a good error
                        -- about duplicate keys.
               it

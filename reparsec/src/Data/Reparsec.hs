@@ -154,4 +154,4 @@ class ExpectedEndOfInput e where
 
 -- | A token in a parse was unexpected.
 class UnexpectedToken t e where
-  unexpectedToken :: t -> e
+  expectedButGot :: t -> t -> e

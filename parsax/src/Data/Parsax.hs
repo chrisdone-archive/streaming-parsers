@@ -67,7 +67,7 @@ data ParseWarning
 data ParseError e
   = UserError !e
   | NoMoreInput
-  | UnexpectedEvent !Event
+  | ExpectedButGot !Event !Event
   | Errors [ParseError e]
   | ExpectedScalarButGot !Event
   | ExpectedObjectKeyOrEndOfObject !Event
@@ -84,7 +84,7 @@ instance Semigroup (ParseError e) where
   x <> y = Errors [x,y]
 
 instance NoMoreInput (ParseError e) where noMoreInputError = NoMoreInput
-instance UnexpectedToken Event (ParseError e) where unexpectedToken = UnexpectedEvent
+instance UnexpectedToken Event (ParseError e) where expectedButGot = ExpectedButGot
 
 -- | A SAX event, containing either a scalar, array or object with keys.
 data Event
