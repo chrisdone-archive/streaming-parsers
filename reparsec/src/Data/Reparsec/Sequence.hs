@@ -3,10 +3,10 @@
 
 module Data.Reparsec.Sequence
   ( nextElement
-  -- , endOfInput
+  , lookAhead
   , expect
   , around
-  , zeroOrMoreUpTo
+  , manyTill
   ) where
 
 import Data.Reparsec
@@ -51,14 +51,34 @@ nextElement =
         in go mi0 more0)
 {-# INLINABLE nextElement #-}
 
+-- | Look ahead by one token.
+lookAhead :: (NoMoreInput e, Monad m) => ParserT (Seq a) e m a
+lookAhead =
+  ParserT
+    (\mi0 pos more0 done failed ->
+       runParserT
+         nextElement
+         mi0
+         pos
+         more0
+         (\mi _pos more a -> done mi pos more a)
+         failed)
+
 -- | Try to extract the next element from the input.
-zeroOrMoreUpTo :: (Semigroup e, Monad m) => Int -> ParserT (Seq a) e m b -> ParserT (Seq a) e m [b]
-zeroOrMoreUpTo maxItems elementParser = go maxItems
+manyTill ::
+     (Eq a, Semigroup e, Monad m, NoMoreInput e)
+  => Int
+  -> a
+  -> ParserT (Seq a) e m b
+  -> ParserT (Seq a) e m [b]
+manyTill maxItems endToken elementParser = go maxItems
   where
     go 0 = pure []
     go itemsLeft = do
-      result <- fmap Just elementParser <> pure Nothing
-      case result of
-        Nothing -> pure []
-        Just element -> fmap (element :) (go (itemsLeft - 1))
-{-# INLINABLE zeroOrMoreUpTo #-}
+      next <- lookAhead
+      if next == endToken
+        then pure []
+        else do
+          element <- elementParser
+          fmap (element :) (go (itemsLeft - 1))
+{-# INLINABLE manyTill #-}

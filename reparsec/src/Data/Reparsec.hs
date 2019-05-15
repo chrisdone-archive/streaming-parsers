@@ -9,6 +9,7 @@ module Data.Reparsec
   ( parseOnlyT
   , parseResultT
   , failWith
+  , catching
   , UnexpectedToken(..)
   , ParserT(..)
   , Result(..)
@@ -140,6 +141,20 @@ parseResultT p mi =
 -- | Fail the parser with the given error.
 failWith :: e -> ParserT i e m a
 failWith e = ParserT (\mi pos more _done failed -> failed mi pos more e)
+
+-- | Run the parser, if it fails, catch the error and pass it to the
+-- handler which will return a default value.
+catching :: (e -> a) -> ParserT i e m a -> ParserT i e m a
+catching handler parser =
+  ParserT
+    (\mi pos more done _failed ->
+       runParserT
+         parser
+         mi
+         pos
+         more
+         done
+         (\inp _pos more' e -> done inp pos more' (handler e)))
 
 --------------------------------------------------------------------------------
 -- Classes

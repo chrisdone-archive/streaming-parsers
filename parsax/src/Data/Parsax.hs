@@ -205,8 +205,9 @@ valueReparsec =
       around
         EventObjectStart
         EventObjectEnd
-        (zeroOrMoreUpTo
+        (manyTill
            limit
+           EventObjectEnd
            (do event <- nextElement
                case event of
                  EventObjectKey key -> do
@@ -217,7 +218,7 @@ valueReparsec =
       around
         EventArrayStart
         EventArrayEnd
-        (zeroOrMoreUpTo limit (valueReparsec valueParser))
+        (manyTill limit EventArrayEnd (valueReparsec valueParser))
     Scalar parse -> do
       event <- nextElement
       case event of

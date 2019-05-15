@@ -186,12 +186,12 @@ conduit =
                          , EventObjectEnd
                          ] .|
                        valueSink defaultConfig stackLikeGrammar)))
-                ( Left (ExpectedButGot EventArrayEnd EventObjectStart)
-                , [ LeftoverEvents
-                      [ EventObjectKey "location"
-                      , EventScalar (TextScalar "666")
-                      ]
-                  ]))
+                ( Left
+                    (Errors
+                       [ ExpectedScalarButGot EventObjectStart
+                       , UserError "Expected integer."
+                       ])
+                , []))
            it
              "Empty object"
              (shouldBe
@@ -271,15 +271,14 @@ reparsec =
                 (shouldBe
                    (parseOnly
                       (valueReparsec
-                         (Array 1 (intScalar <> Scalar (const (Left "")))))
+                         (Array 1 (intScalar <> Scalar (const (Left "Error!")))))
                       [ EventArrayStart
                       , EventScalar (TextScalar "a")
                       , EventArrayEnd
                       ])
                    (Left
-                      (ExpectedButGot
-                         EventArrayEnd
-                         (EventScalar (TextScalar "a"))) :: Either (ParseError Text) [Int])))
+                      (Errors
+                         [UserError "Expected integer.", UserError "Error!"]) :: Either (ParseError Text) [Int])))
         describe
           "Object"
           (do it
@@ -295,7 +294,7 @@ reparsec =
                    (parseOnly
                       (valueReparsec stackLikeGrammar)
                       stackLikeInputsWithDuplicate)
-                   (Left (ExpectedButGot EventArrayEnd EventObjectStart)))
+                   (Left (Errors [ExpectedScalarButGot EventObjectStart,ExpectedObjectKeyOrEndOfObject (EventScalar (ScientificScalar 777.0))])))
                        -- Below: With the schema filtering, we get a good error
                        -- about duplicate keys.
               it
