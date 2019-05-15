@@ -17,8 +17,6 @@ import           Data.Scientific
 import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import           Data.Text (Text)
-import           Data.Text (Text)
-import qualified Data.Text as T
 import           Test.Hspec
 
 main :: IO ()
@@ -36,6 +34,161 @@ spec = do
                    (CL.sourceList [] .|
                     valueSink defaultConfig (Object (PureObject ())))))
              (Left (EmptyDocument :: ParseError ()), mempty)))
+  reparsec
+  peacemeal
+  conduit
+  yaml
+  json
+
+json :: SpecWith ()
+json =
+  describe
+    "Json"
+    (do it
+          "From file, limited warnings"
+          (shouldReturn
+             (parseJsonFile
+                defaultConfig {configMaxKeyWarnings = 3}
+                stackLikeGrammar
+                "test/assets/stack.json")
+             ( stackLikeResultJson
+             , [ IgnoredKey "extraneous"
+               , IgnoredKey "extraneous1"
+               , IgnoredKey "extraneous2"
+               ]))
+        it
+          "From file"
+          (shouldReturn
+             (parseJsonFile
+                defaultConfig
+                stackLikeGrammar
+                "test/assets/stack.json")
+             ( stackLikeResultJson
+             , [ IgnoredKey "extraneous"
+               , IgnoredKey "extraneous1"
+               , IgnoredKey "extraneous2"
+               , IgnoredKey "extraneous3"
+               ]))
+        it
+          "From string"
+          (shouldReturn
+             (do bytes <- S.readFile "test/assets/stack.json"
+                 parseJsonByteString defaultConfig stackLikeGrammar bytes)
+             ( stackLikeResultJson
+             , [ IgnoredKey "extraneous"
+               , IgnoredKey "extraneous1"
+               , IgnoredKey "extraneous2"
+               , IgnoredKey "extraneous3"
+               ]))
+        it
+          "Empty"
+          (shouldReturn
+             (parseJsonByteString defaultConfig (Array 1 (Scalar pure)) "")
+             ( Left
+                 ((TokenizeError
+                     (AttoParseError
+                        { errorContexts = []
+                        , errorMessage = "not enough input"
+                        , errorPosition =
+                            Position {posLine = 1, posCol = 1, posOffset = 0}
+                        })) :: JsonError ())
+             , mempty)))
+
+yaml :: SpecWith ()
+yaml =
+  describe
+    "Yaml"
+    (do it
+          "From file, mapping"
+          (shouldReturn
+             (parseYamlFile
+                defaultConfig {configMaxKeyWarnings = 3}
+                (Mapping 5 (Mapping 1 boolScalar))
+                "test/assets/mapping.yaml")
+             ( Right
+                 [("package1", [("f1", True)]), ("package2", [("f2", True)])]
+             , mempty))
+        it
+          "From file"
+          (shouldReturn
+             (parseYamlFile
+                defaultConfig
+                stackLikeGrammar
+                "test/assets/stack.yaml")
+             (stackLikeResultYaml, mempty))
+        it
+          "From string"
+          (shouldReturn
+             (do bytes <- S.readFile "test/assets/stack.yaml"
+                 parseYamlByteString defaultConfig stackLikeGrammar bytes)
+             (stackLikeResultYaml, mempty))
+        it
+          "Empty"
+          (shouldReturn
+             (parseYamlByteString defaultConfig (Array 1 (Scalar pure)) "")
+             ( Left
+                 (Data.Parsax.Yaml.ParseError (EmptyDocument :: ParseError ()))
+             , mempty))
+        describe
+          "Variables"
+          (do it
+                "Simple"
+                (shouldReturn
+                   (parseYamlFile
+                      defaultConfig
+                      variablesGrammar
+                      "test/assets/variables.yaml")
+                   ( Right
+                       (map
+                          TextScalar
+                          ["Apple", "Beachball", "Cartoon", "Duckface", "Apple"])
+                   , mempty))
+              it
+                "Object sized"
+                (shouldReturn
+                   (parseYamlFile
+                      defaultConfig
+                      stackLikeGrammar
+                      "test/assets/stack-variables.yaml")
+                   (stackLikeResultVarsYaml, mempty))))
+
+conduit :: SpecWith ()
+conduit =
+  describe
+    "Conduit"
+    (describe
+       "Object"
+       (do it
+             "Object with bogus fields"
+             (shouldBe
+                (runST
+                   (runConduit
+                      (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
+                       valueSink defaultConfig stackLikeGrammar)))
+                (stackLikeResult, pure (IgnoredKey "wibble")))
+           it
+             "Empty object"
+             (shouldBe
+                (runST
+                   (runConduit
+                      (CL.sourceList [EventObjectStart, EventObjectEnd] .|
+                       valueSink defaultConfig (Object (pure ())))))
+                (Right () :: Either (ParseError ()) (), mempty))))
+
+peacemeal :: SpecWith ()
+peacemeal =
+  describe
+    "Peacemeal feeding"
+    (describe
+       "Object"
+       (do it
+             "Object"
+             (shouldBe
+                (parsePeacemeal (valueReparsec stackLikeGrammar) stackLikeInputs)
+                stackLikeResult)))
+
+reparsec :: SpecWith ()
+reparsec =
   describe
     "Reparsec"
     (do describe
@@ -105,8 +258,8 @@ spec = do
                 (shouldBe
                    (parseOnly (valueReparsec stackLikeGrammar) stackLikeInputs)
                    stackLikeResult)
-              -- Below: Without the schema filtering, we get a less
-              -- helpful error. But it's an error nontheless.
+                       -- Below: Without the schema filtering, we get a less
+                       -- helpful error. But it's an error nontheless.
               it
                 "Object with duplicate keys"
                 (shouldBe
@@ -114,8 +267,8 @@ spec = do
                       (valueReparsec stackLikeGrammar)
                       stackLikeInputsWithDuplicate)
                    (Left (UnexpectedEvent EventObjectStart)))
-              -- Below: With the schema filtering, we get a good error
-              -- about duplicate keys.
+                       -- Below: With the schema filtering, we get a good error
+                       -- about duplicate keys.
               it
                 "Object with bogus fields (schema filtered)"
                 (shouldBe
@@ -124,163 +277,33 @@ spec = do
                          (CL.sourceList (toList stackLikeInputsWithDuplicate) .|
                           valueSink defaultConfig stackLikeGrammar)))
                    (Left (BadSchema (SchemaDuplicateKey "location")), mempty))))
-  describe
-    "Peacemeal feeding"
-    (describe
-       "Object"
-       (do it
-             "Object"
-             (shouldBe
-                (parsePeacemeal (valueReparsec stackLikeGrammar) stackLikeInputs)
-                stackLikeResult)))
-  describe
-    "Conduit"
-    (describe
-       "Object"
-       (do it
-             "Object with bogus fields"
-             (shouldBe
-                (runST
-                   (runConduit
-                      (CL.sourceList (toList stackLikeInputsWithBogusFields) .|
-                       valueSink defaultConfig stackLikeGrammar)))
-                (stackLikeResult, pure (IgnoredKey "wibble")))
-           it
-             "Empty object"
-             (shouldBe
-                (runST
-                   (runConduit
-                      (CL.sourceList [EventObjectStart, EventObjectEnd] .|
-                       valueSink defaultConfig (Object (pure ())))))
-                (Right () :: Either (ParseError ()) (), mempty))))
-  describe
-    "Yaml"
-    (do it
-          "From file, mapping"
-          (shouldReturn
-             (parseYamlFile
-                defaultConfig {configMaxKeyWarnings = 3}
-                (Mapping 5 (Mapping 1 boolScalar))
-                "test/assets/mapping.yaml")
-             ( Right
-                 [("package1", [("f1", True)]), ("package2", [("f2", True)])]
-             , mempty))
-        it
-          "From file"
-          (shouldReturn
-             (parseYamlFile
-                defaultConfig
-                stackLikeGrammar
-                "test/assets/stack.yaml")
-             (stackLikeResultYaml, mempty))
-        it
-          "From string"
-          (shouldReturn
-             (do bytes <- S.readFile "test/assets/stack.yaml"
-                 parseYamlByteString defaultConfig stackLikeGrammar bytes)
-             (stackLikeResultYaml, mempty))
-        it
-          "Empty"
-          (shouldReturn
-             (parseYamlByteString defaultConfig (Array 1 (Scalar pure)) "")
-             ( Left
-                 (Data.Parsax.Yaml.ParseError (EmptyDocument :: ParseError ()))
-             , mempty))
-        describe
-          "Variables"
-          (do it
-                "Simple"
-                (shouldReturn
-                   (parseYamlFile
-                      defaultConfig
-                      variablesGrammar
-                      "test/assets/variables.yaml")
-                   ( Right
-                       (map
-                          TextScalar
-                          ["Apple", "Beachball", "Cartoon", "Duckface", "Apple"])
-                   , mempty))
-              it
-                "Object sized"
-                (shouldReturn
-                   (parseYamlFile
-                      defaultConfig
-                      stackLikeGrammar
-                      "test/assets/stack-variables.yaml")
-                   (stackLikeResultVarsYaml, mempty))))
-  describe
-    "Json"
-    (do it
-          "From file, limited warnings"
-          (shouldReturn
-             (parseJsonFile
-                defaultConfig {configMaxKeyWarnings = 3}
-                stackLikeGrammar
-                "test/assets/stack.json")
-             ( stackLikeResultJson
-             , [ IgnoredKey "extraneous"
-               , IgnoredKey "extraneous1"
-               , IgnoredKey "extraneous2"
-               ]))
-        it
-          "From file"
-          (shouldReturn
-             (parseJsonFile
-                defaultConfig
-                stackLikeGrammar
-                "test/assets/stack.json")
-             ( stackLikeResultJson
-             , [ IgnoredKey "extraneous"
-               , IgnoredKey "extraneous1"
-               , IgnoredKey "extraneous2"
-               , IgnoredKey "extraneous3"
-               ]))
-        it
-          "From string"
-          (shouldReturn
-             (do bytes <- S.readFile "test/assets/stack.json"
-                 parseJsonByteString defaultConfig stackLikeGrammar bytes)
-             ( stackLikeResultJson
-             , [ IgnoredKey "extraneous"
-               , IgnoredKey "extraneous1"
-               , IgnoredKey "extraneous2"
-               , IgnoredKey "extraneous3"
-               ]))
-        it
-          "Empty"
-          (shouldReturn
-             (parseJsonByteString defaultConfig (Array 1 (Scalar pure)) "")
-             ( Left
-                 ((TokenizeError
-                     (AttoParseError
-                        { errorContexts = []
-                        , errorMessage = "not enough input"
-                        , errorPosition =
-                            Position {posLine = 1, posCol = 1, posOffset = 0}
-                        })) :: JsonError ())
-             , mempty)))
-  where
-    parsePeacemeal ::
-         (forall s. ParserT (Seq Event) (ParseError Text) (ST s) a)
-      -> Seq Event
-      -> Either (ParseError Text) a
-    parsePeacemeal p input =
-      runST
-        (let loop i = do
-               result <- parseResultT p (Just (Seq.take i input))
-               case result of
-                 Done _ _ _ r -> pure (Right r)
-                 Failed _ _ _ err -> pure (Left err)
-                 Partial {} ->
-                   if i > length input
-                     then pure (Left NoMoreInput)
-                     else loop (i + 1)
-          in loop 0)
-    parseOnly ::
-         (forall s. ParserT (Seq Event) (ParseError Text) (ST s) a)
-      -> Seq Event
-      -> Either (ParseError Text) a
-    parseOnly p i = runST (parseOnlyT p i)
+
+
+--------------------------------------------------------------------------------
+-- Helpers
+
+parsePeacemeal ::
+     (forall s. ParserT (Seq Event) (ParseError Text) (ST s) a)
+  -> Seq Event
+  -> Either (ParseError Text) a
+parsePeacemeal p input =
+  runST
+    (let loop i = do
+           result <- parseResultT p (Just (Seq.take i input))
+           case result of
+             Done _ _ _ r -> pure (Right r)
+             Failed _ _ _ err -> pure (Left err)
+             Partial {} ->
+               if i > length input
+                 then pure (Left NoMoreInput)
+                 else loop (i + 1)
+      in loop 0)
+
+parseOnly ::
+     (forall s. ParserT (Seq Event) (ParseError Text) (ST s) a)
+  -> Seq Event
+  -> Either (ParseError Text) a
+parseOnly p i = runST (parseOnlyT p i)
 
 --------------------------------------------------------------------------------
 -- stack.yaml-like test data
@@ -381,9 +404,9 @@ intScalar =
            Just v -> pure v
        _ -> Left "Expected integer.")
 
-
+boolScalar :: ValueParser [Char] m Bool
 boolScalar =
   Scalar
     (\case
        BoolScalar bool -> pure bool
-       scalar -> Left "Invalid bool")
+       _ -> Left "Invalid bool")
