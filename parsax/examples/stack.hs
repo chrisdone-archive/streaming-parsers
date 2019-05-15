@@ -35,13 +35,11 @@ module Main where
 import           Control.Monad.Reader
 import           Data.IORef
 import           Data.List.NonEmpty (NonEmpty(..))
-import qualified Data.List.NonEmpty as NE
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import           Data.Parsax
+import           Data.Parsax as Parsax
 import           Data.Parsax.Yaml
 import           Data.Sequence (Seq)
-import qualified Data.Sequence as Seq
 import           Data.Text (Text)
 
 default (Text)
@@ -86,7 +84,7 @@ main :: IO ()
 main = do
   ref <- newIORef mempty
   (result, warnings) <-
-    runReaderT (parseYamlFile configObject "stack-fake.yaml") ref
+    runReaderT (parseYamlFile defaultConfig configObject "stack-fake.yaml") ref
   userwarnings <- readIORef ref
   print ("User warnings", userwarnings)
   print ("Warnings", warnings)
@@ -94,7 +92,7 @@ main = do
 
 configObject ::
      (MonadReader (IORef (Seq Warning)) m, MonadIO m)
-  => ValueParser ConfigError m Config
+  => ValueParser ConfigError m Main.Config
 configObject =
   Object
     (do configResolver <- Field "resolver" textScalar
@@ -118,7 +116,7 @@ configObject =
                M.fromList
                (Mapping maxBound (fmap M.fromList (Mapping maxBound boolScalar))))
         pure
-          (Config {configFlags, configResolver, configPackages, configExtraDeps}))
+          (Main.Config {configFlags, configResolver, configPackages, configExtraDeps}))
   where
     plainPackageScalar =
       Scalar
