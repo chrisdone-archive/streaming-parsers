@@ -8,6 +8,7 @@
 module Data.Parsax.Json
   ( parseJsonFile
   , parseJsonByteString
+  , parseBytesSink
   , jsonSink
   , JsonError(..)
   , AttoParseError(..)
@@ -15,6 +16,7 @@ module Data.Parsax.Json
   ) where
 
 import           Control.Applicative
+import           Control.Monad.Primitive
 import           Control.Monad.Trans.Resource
 import qualified Data.Aeson.Parser.Internal as Aeson
 import           Data.Attoparsec.ByteString (Parser)
@@ -99,12 +101,27 @@ parseJsonFile config valueParser filePath =
         Left err -> pure (Left err, mempty)
 
 parseJsonByteString ::
-     Config
-  -> ValueParser e (ResourceT IO) a
+     (PrimMonad m, MonadUnliftIO m)
+  => Config
+  -> ValueParser e (ResourceT m) a
   -> ByteString
-  -> IO (Either (JsonError e) a, Seq ParseWarning)
+  -> m (Either (JsonError e) a, Seq ParseWarning)
 parseJsonByteString config valueParser byteString =
   runConduitRes (yield byteString .| sink)
+  where
+    sink = do
+      (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink config valueParser)
+      case tokenizeResult of
+        Right () -> pure (first (first ParseError) parseResult)
+        Left err -> pure (Left err, mempty)
+
+parseBytesSink ::
+     PrimMonad m
+  => Config
+  -> ValueParser e m a
+  -> ConduitT ByteString i m (Either (JsonError e) a, Seq ParseWarning)
+parseBytesSink config valueParser =
+  sink
   where
     sink = do
       (tokenizeResult, parseResult) <- fuseBoth jsonSink (valueSink config valueParser)
