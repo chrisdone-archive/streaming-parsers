@@ -7,11 +7,37 @@ module Data.Reparsec.Sequence
   , expect
   , around
   , manyTill
+  , parseConduit
   ) where
 
-import Data.Reparsec
-import Data.Sequence (Seq(..))
+import           Control.Monad.Trans
+import           Data.Conduit
+import           Data.Reparsec
+import           Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
+
+-- | Produce a stream of outputs from a stream of inputs.
+parseConduit ::
+     Monad m
+  => ParserT (Seq i) e m o
+  -> ConduitT i (Either e o) m ()
+parseConduit parser0 = worker
+  where
+    worker = go (parseResultT parser0)
+    go parser = do
+      v <- await
+      result <- lift (parser (fmap pure v))
+      case result of
+        Done input pos _more parse -> do
+          mapM_ leftover (Seq.drop pos input)
+          yield (Right parse)
+          worker
+        Failed remaining pos _more errors -> do
+          mapM_ leftover (Seq.drop pos remaining)
+          yield (Left errors)
+          worker
+        Partial cont ->
+          go cont
 
 -- | Wrap around something.
 around ::
