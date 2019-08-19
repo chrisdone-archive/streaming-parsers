@@ -20,11 +20,11 @@ data ParseError
   | NonLetter
   | ExpectedEof
   | Errors [ParseError]
-  | UnexpectedToken !Char
+  | UnexpectedToken !Char !Char
   deriving (Eq, Show)
 
 instance NoMoreInput ParseError where noMoreInputError = EndOfInput
-instance UnexpectedToken Char ParseError where unexpectedToken = UnexpectedToken
+instance UnexpectedToken Char ParseError where expectedButGot = UnexpectedToken
 instance NonDigitError ParseError where nonDigitError = NonDigit
 instance NonLetterError ParseError where nonLetterError = NonLetter
 instance ExpectedEndOfInput ParseError where expectedEndOfInputError = ExpectedEof
@@ -46,14 +46,17 @@ spec = do
        "Backtracking across a partial"
        (shouldBe
           (parsePeacemeal
-             ((Seq.expect 'a' *> Seq.expect 'a') <> (Seq.expect 'a' *> Seq.expect 'b'))
-             ['a','b'])
+             ((Seq.expect 'a' *> Seq.expect 'a') <>
+              (Seq.expect 'a' *> Seq.expect 'b'))
+             ['a', 'b'])
           (Right ())))
   describe
     "Empty input"
         {-it "Expected empty" (shouldBe (parseOurs endOfInput []) (Right ()))-}
     (do it "Nonexpected empty" (shouldBe (parseOurs digit []) (Left EndOfInput))
-        it "Nonexpected empty after feed" (shouldBe (parseOurs (digit *> digit) ['2']) (Left EndOfInput))
+        it
+          "Nonexpected empty after feed"
+          (shouldBe (parseOurs (digit *> digit) ['2']) (Left EndOfInput))
         it
           "Nonexpected empty"
           (shouldBe (parseOurs letter []) (Left EndOfInput)))
@@ -75,22 +78,22 @@ spec = do
         {-it
           "With end of input"
           (shouldBe (parseOurs (letter <* endOfInput) "a") (Right 'a'))-}
-        it
+        {-it
           "Zero or more"
-          (shouldBe (parseOurs (zeroOrMore letter) "a") (Right "a"))
-        it
+          (shouldBe (parseOurs (zeroOrMore letter) "a") (Right "a"))-}
+        {-it
           "Zero or more: with different following token"
-          (shouldBe (parseOurs (zeroOrMore letter) "a1") (Right "a"))
-        it
+          (shouldBe (parseOurs (zeroOrMore letter) "a1") (Right "a"))-}
+        {-it
           "Zero or more: with different following token"
           (shouldBe
              (parseOurs (zeroOrMore (letter <* digit)) "a1c2!")
-             (Right "ac"))
-        it
+             (Right "ac"))-}
+        {-it
           "Zero or more: with different following token"
           (shouldBe
              (parseOurs (zeroOrMore (letter <* digit)) "a1_2!")
-             (Right "a"))
+             (Right "a"))-}
         it
           "Around"
           (shouldBe (parseOurs (around 'a' '1' (pure ())) "a1") (Right ())))
@@ -100,7 +103,7 @@ spec = do
           "Around fail"
           (shouldBe
              (parseOurs (around 'a' '1' (pure ())) "a2")
-             (Left (UnexpectedToken '2')))
+             (Left (UnexpectedToken '1' '2')))
         it
           "Exclamation points"
           (shouldBe
@@ -162,16 +165,6 @@ spec = do
              True))
   describe
     "Sequence"
-        {-it
-          "endOfInput"
-          (shouldBe
-             (parseSeq (Seq.expect 'a' <* Seq.endOfInput) (Seq.fromList "a"))
-             (Right ()))-}
-        {-it
-          "Falsified endOfInput"
-          (shouldBe
-             (parseSeq (Seq.expect 'a' <* Seq.endOfInput) (Seq.fromList "ab"))
-             (Left expectedEndOfInputError))-}
     (do it
           "Not more input"
           (shouldBe
@@ -186,11 +179,6 @@ spec = do
                 Partial {} -> True
                 _ -> False)
              True)
-        it
-          "zeroOrMore"
-          (shouldBe
-             (parseSeq (Seq.zeroOrMore (Seq.expect 'b')) (Seq.fromList "bbb"))
-             (Right [(), (), ()]))
         it
           "Enough input"
           (shouldBe
