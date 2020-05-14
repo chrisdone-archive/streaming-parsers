@@ -59,7 +59,7 @@ expect a = do
     else failWith (expectedButGot a a')
 
 -- | Expect an element.
-satisfy :: (UnexpectedToken a e, NoMoreInput e, Eq a, Monad m) => (a -> Either e b) -> ParserT (Seq a) e m b
+satisfy :: (NoMoreInput e, Eq a, Monad m) => (a -> Either e b) -> ParserT (Seq a) e m b
 satisfy f = do
   a' <- nextElement
   case f a' of
@@ -67,7 +67,7 @@ satisfy f = do
     Right b -> pure b
 
 -- | Expect an element.
-satisfy_ :: (UnexpectedToken a e, NoMoreInput e, Eq a, Monad m) => (a -> Either e b) -> ParserT (Seq a) e m ()
+satisfy_ :: (NoMoreInput e, Eq a, Monad m) => (a -> Either e b) -> ParserT (Seq a) e m ()
 satisfy_ f = do
   a' <- nextElement
   case f a' of
