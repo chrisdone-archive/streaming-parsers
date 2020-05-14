@@ -8,6 +8,8 @@ module Data.Reparsec.Sequence
   , around
   , manyTill
   , parseConduit
+  , satisfy
+  , satisfy_
   ) where
 
 import           Control.Monad.Trans
@@ -55,6 +57,22 @@ expect a = do
   if a == a'
     then pure ()
     else failWith (expectedButGot a a')
+
+-- | Expect an element.
+satisfy :: (UnexpectedToken a e, NoMoreInput e, Eq a, Monad m) => (a -> Either e b) -> ParserT (Seq a) e m b
+satisfy f = do
+  a' <- nextElement
+  case f a' of
+    Left e -> failWith e
+    Right b -> pure b
+
+-- | Expect an element.
+satisfy_ :: (UnexpectedToken a e, NoMoreInput e, Eq a, Monad m) => (a -> Either e b) -> ParserT (Seq a) e m ()
+satisfy_ f = do
+  a' <- nextElement
+  case f a' of
+    Left e -> failWith e
+    Right _b -> pure ()
 
 -- | Try to extract the next element from the input.
 nextElement :: (NoMoreInput e, Monad m) => ParserT (Seq a) e m a
