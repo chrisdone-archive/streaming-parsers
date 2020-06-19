@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -20,7 +21,7 @@ module Data.Reparsec
   ) where
 
 import Control.Monad
-import Control.Monad.Trans
+import Control.Monad.Reader
 import Data.Maybe
 
 --------------------------------------------------------------------------------
@@ -57,6 +58,13 @@ instance Monad m => Monad (ParserT i e m) where
            (\i' !pos' more' v -> runParserT (f v) i' pos' more' done failed)
            failed)
   {-# INLINABLE (>>=) #-}
+
+instance Monad m => MonadReader r (ParserT i e (ReaderT r m)) where
+  ask = lift ask
+  local f m =
+    ParserT
+      (\i pos more done failed ->
+         ReaderT (runReaderT (runParserT m i pos more done failed) . f))
 
 instance MonadTrans (ParserT i e) where
   lift m =
