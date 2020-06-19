@@ -6,6 +6,7 @@ module Data.Reparsec.List
   , expect
   , around
   , zeroOrMoreUpTo
+  , endOfInput
   ) where
 
 import Data.Reparsec
@@ -27,6 +28,27 @@ expect a = do
     then pure ()
     else failWith (expectedButGot a a')
 
+-- | Expect the end of input.
+endOfInput :: (ExpectedEndOfInput e, Monad m) => ParserT [a] e m ()
+endOfInput =
+  ParserT
+    (\mi0 pos more0 done failed ->
+       let go mi more =
+             case drop pos mi of
+               (_:_) -> failed mi (pos + 1) more expectedEndOfInputError
+               [] ->
+                 case more of
+                   Complete -> done mi pos more ()
+                   Incomplete ->
+                     pure
+                       (Partial
+                          (\m ->
+                             case m of
+                               Nothing -> go mi Complete
+                               Just i -> go (mi <> i) more))
+        in go mi0 more0)
+{-# INLINABLE endOfInput #-}
+
 -- | Try to extract the next element from the input.
 nextElement :: (NoMoreInput e, Monad m) => ParserT [a] e m a
 nextElement =
@@ -43,7 +65,7 @@ nextElement =
                        (Partial
                           (\m ->
                              case m of
-                               Nothing -> go [] Complete
+                               Nothing -> go mi Complete
                                Just i -> go (mi <> i) more))
         in go mi0 more0)
 {-# INLINABLE nextElement #-}

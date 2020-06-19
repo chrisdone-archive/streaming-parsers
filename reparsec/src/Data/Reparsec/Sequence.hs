@@ -10,6 +10,7 @@ module Data.Reparsec.Sequence
   , parseConduit
   , satisfy
   , satisfy_
+  , endOfInput
   ) where
 
 import           Control.Monad.Trans
@@ -90,10 +91,31 @@ nextElement =
                        (Partial
                           (\m ->
                              case m of
-                               Nothing -> go mempty Complete
+                               Nothing -> go mi Complete
                                Just i -> go (mi <> i) more))
         in go mi0 more0)
 {-# INLINABLE nextElement #-}
+
+-- | Expect the end of input.
+endOfInput :: (ExpectedEndOfInput e, Monad m) => ParserT (Seq a) e m ()
+endOfInput =
+  ParserT
+    (\mi0 pos more0 done failed ->
+       let go mi more =
+             case Seq.drop pos mi of
+               (_ :<| _) -> failed mi (pos + 1) more expectedEndOfInputError
+               Empty ->
+                 case more of
+                   Complete -> done mi pos more ()
+                   Incomplete ->
+                     pure
+                       (Partial
+                          (\m ->
+                             case m of
+                               Nothing -> go mi Complete
+                               Just i -> go (mi <> i) more))
+        in go mi0 more0)
+{-# INLINABLE endOfInput #-}
 
 -- | Look ahead by one token.
 lookAhead :: (NoMoreInput e, Monad m) => ParserT (Seq a) e m a

@@ -52,8 +52,8 @@ spec = do
           (Right ())))
   describe
     "Empty input"
-        {-it "Expected empty" (shouldBe (parseOurs endOfInput []) (Right ()))-}
-    (do it "Nonexpected empty" (shouldBe (parseOurs digit []) (Left EndOfInput))
+    (do it "Expected empty" (shouldBe (parseOurs endOfInput []) (Right ()))
+        it "Nonexpected empty" (shouldBe (parseOurs digit []) (Left EndOfInput))
         it
           "Nonexpected empty after feed"
           (shouldBe (parseOurs (digit *> digit) ['2']) (Left EndOfInput))
@@ -70,30 +70,30 @@ spec = do
               it
                 "123"
                 (shouldBe (parseOurs (letters <> digits) "123") (Right "123")))
-        {-it
+        it
           "With end of input"
           (shouldBe
              (parseOurs ((letters <> digits) <* endOfInput) "abc")
-             (Right "abc"))-}
-        {-it
+             (Right "abc"))
+        it
           "With end of input"
-          (shouldBe (parseOurs (letter <* endOfInput) "a") (Right 'a'))-}
-        {-it
+          (shouldBe (parseOurs (letter <* endOfInput) "a") (Right 'a'))
+        it
           "Zero or more"
-          (shouldBe (parseOurs (zeroOrMore letter) "a") (Right "a"))-}
-        {-it
+          (shouldBe (parseOurs (zeroOrMoreUpTo 10 letter) "a") (Right "a"))
+        it
           "Zero or more: with different following token"
-          (shouldBe (parseOurs (zeroOrMore letter) "a1") (Right "a"))-}
-        {-it
-          "Zero or more: with different following token"
-          (shouldBe
-             (parseOurs (zeroOrMore (letter <* digit)) "a1c2!")
-             (Right "ac"))-}
-        {-it
+          (shouldBe (parseOurs (zeroOrMoreUpTo 10 letter) "a1") (Right "a"))
+        it
           "Zero or more: with different following token"
           (shouldBe
-             (parseOurs (zeroOrMore (letter <* digit)) "a1_2!")
-             (Right "a"))-}
+             (parseOurs (zeroOrMoreUpTo 10 (letter <* digit)) "a1c2!")
+             (Right "ac"))
+        it
+          "Zero or more: with different following token"
+          (shouldBe
+             (parseOurs (zeroOrMoreUpTo 10 (letter <* digit)) "a1_2!")
+             (Right "a"))
         it
           "Around"
           (shouldBe (parseOurs (around 'a' '1' (pure ())) "a1") (Right ())))
@@ -112,11 +112,11 @@ spec = do
         it
           "Exclamation points"
           (shouldBe (parseOurs letters "!!!") (Left NonLetter))
-        {-it
+        it
           "End of input expected"
           (shouldBe
              (parseOurs ((letters <> digits) <* endOfInput) "abc!")
-             (Left ExpectedEof))-}
+             (Left ExpectedEof))
      )
   describe
     "Partial input"
@@ -152,6 +152,28 @@ spec = do
                 Done {} -> True
                 Partial continue ->
                   case runIdentity (continue Nothing) of
+                    Failed {} -> True
+                    _ -> False
+                _ -> False)
+             True)
+        it
+          "Fed input: finished: end of input expected"
+          (shouldBe
+             (case parseOursPartial (letter *> endOfInput) "a" of
+                Done {} -> False
+                Partial continue ->
+                  case runIdentity (continue Nothing) of
+                    Failed {} -> False
+                    _ -> True
+                _ -> False)
+             True)
+        it
+          "Fed input: finished: end of input expected"
+          (shouldBe
+             (case parseOursPartial (letter *> endOfInput) "a" of
+                Done {} -> False
+                Partial continue ->
+                  case runIdentity (continue (Just "b")) of
                     Failed {} -> True
                     _ -> False
                 _ -> False)
